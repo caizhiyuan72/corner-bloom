@@ -343,11 +343,35 @@ sources = {'android/content/Context.java': 'package android.content;\n'
                                                  '}\n',
  'android/text/InputType.java': 'package android.text; public class InputType {public static final '
                                 'int TYPE_MASK_CLASS=15,TYPE_CLASS_TEXT=1;}'}
+# Window manager stand-in is deliberately distinct from the application manager.
+sources["android/view/WindowManager.java"]="package android.view;public class WindowManager {}"
+sources["android/content/Context.java"]=sources["android/content/Context.java"].replace(
+ 'ACCESSIBILITY_SERVICE="accessibility";', 'ACCESSIBILITY_SERVICE="accessibility",WINDOW_SERVICE="window";')
+sources["android/accessibilityservice/AccessibilityService.java"]=sources["android/accessibilityservice/AccessibilityService.java"].replace(
+ 'public Object getSystemService(String n){return manager;}',
+ 'public android.view.WindowManager windows=new android.view.WindowManager();public Object getSystemService(String n){return WINDOW_SERVICE.equals(n)?windows:manager;}')
+sources["dev/corner/bloom/OverlayManagerProtocolTest.java"]='''
+package dev.corner.bloom;import android.os.*;import android.content.*;
+public final class OverlayManagerProtocolTest {
+ static void check(boolean v,String s){if(!v)throw new AssertionError(s);}
+ public static void main(String[] args){
+  check(TapAccessibilityService.overlayWindowManager()==null,"no manager before connection");
+  TapAccessibilityService first=new TapAccessibilityService();first.onServiceConnected();Handler.advance(0);
+  check(TapAccessibilityService.overlayWindowManager()==first.windows,"manager comes from connected service context");
+  check(first.info.eventTypes==0&&!first.manager.enabled,"overlay does not enable content events or touch exploration");
+  first.onUnbind(new Intent());check(TapAccessibilityService.overlayWindowManager()==null,"manager unavailable after unbind");
+  TapAccessibilityService second=new TapAccessibilityService();second.onServiceConnected();Handler.advance(0);
+  check(TapAccessibilityService.overlayWindowManager()==second.windows&&second.windows!=first.windows,"reconnection returns new service manager");
+  second.onDestroy();check(TapAccessibilityService.overlayWindowManager()==null,"destroy invalidates manager");
+  System.out.println("Accessibility overlay manager: connected service context, reconnect, disconnect and no touch-exploration/content events passed (host fixture).");
+ }
+}
+'''
 paths=[]
 for name,content in sources.items():
  p=work/"src"/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(content);paths.append(str(p))
 for name in ["TapAccessibilityService.java","EditorDeleteBridge.java","DeleteHold.java"]:
  paths.append(str(project/"app/src/main/java/dev/corner/bloom"/name))
 subprocess.run(["java","-jar",os.environ["BLOOM_ECJ_JAR"],"-17","-d",str(work/"classes"),*paths],check=True)
-for test in ["TapServiceProtocolTest","EditorDeleteBridgeTest"]:
+for test in ["TapServiceProtocolTest","EditorDeleteBridgeTest","OverlayManagerProtocolTest"]:
  subprocess.run(["java","-cp",str(work/"classes"),"dev.corner.bloom."+test],check=True)

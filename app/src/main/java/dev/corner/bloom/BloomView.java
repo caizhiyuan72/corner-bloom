@@ -5,7 +5,7 @@ import android.graphics.*;
 import android.view.*;
 import java.util.*;
 
-/** The same gesture/renderer is used inside the practice area and the real overlay. */
+/** Gesture input and animated launcher drawing for the real overlay. */
 final class BloomView extends View implements Choreographer.FrameCallback {
     interface Host { void expand(); void collapse(); void launch(AppEntry entry); }
     private final Prefs prefs;
@@ -15,7 +15,8 @@ final class BloomView extends View implements Choreographer.FrameCallback {
     private final Host host;
     private final boolean overlay;
     private List<AppEntry> apps=new ArrayList<>();
-    private final RectF trigger=new RectF();
+    private final RectF trigger=new RectF(),iconBounds=new RectF();
+    private final Typeface labelTypeface=Typeface.create("sans-serif-medium",Typeface.NORMAL);
     private final float[] xs=new float[15],ys=new float[15],emphasis=new float[15];
     private FanGeometry.Point[] points=new FanGeometry.Point[0];
     private float fullWidth,fullHeight,originX,originY,downX,downY,fingerX,fingerY;
@@ -95,10 +96,11 @@ final class BloomView extends View implements Choreographer.FrameCallback {
         if(moving)kick();else previousFrame=0;
     }
     private void updatePositions(){
+        float strength=prefs.get("motion",100)/100f;
         for(int i=0;i<points.length;i++){
             FanGeometry.Point p=points[i];
             float t=FanGeometry.clamp((progress-p.delay)/(1-p.delay),0,1.14f);
-            float curl=(float)Math.sin(Math.PI*Math.min(t,1))*dp(17)*(i%2==0?1:-1)*prefs.get("motion",100)/100f;
+            float curl=(float)Math.sin(Math.PI*Math.min(t,1))*dp(17)*(i%2==0?1:-1)*strength;
             xs[i]=originX+(p.x*density-originX)*t+curl;
             ys[i]=originY+(p.y*density-originY)*t-curl*.4f;
         }
@@ -164,12 +166,12 @@ final class BloomView extends View implements Choreographer.FrameCallback {
         if(visible>.002f){
             drawFog(canvas,visible);
             updatePositions();
-            for(int i=0;i<apps.size();i++)if(i!=selected)drawIcon(canvas,i);
-            if(selected>=0)drawIcon(canvas,selected);
+            float strength=prefs.get("motion",100)/100f;
+            for(int i=0;i<apps.size();i++)if(i!=selected)drawIcon(canvas,i,strength);
+            if(selected>=0)drawIcon(canvas,selected,strength);
             paint.setColor(Color.argb((int)(165*visible),216,209,246));
             canvas.drawCircle(originX,originY,dp(6)*(1-visible*.3f),paint);
             if(selected>=0)drawLabel(canvas,apps.get(selected).name,xs[selected],ys[selected]-dp(43));
-            else if(activated)drawLabel(canvas,"滑向应用 · 松手打开",Math.max(dp(115),originX-dp(145)),originY-dp(305));
         }
         // The real handle has its own permanent window. Never draw it in this canvas.
         if(!overlay&&progress<.6f)drawHandle(canvas,trigger);
@@ -223,11 +225,10 @@ final class BloomView extends View implements Choreographer.FrameCallback {
         float x=bounds.right-dp(8);
         canvas.drawRoundRect(x-dp(2),bounds.centerY()-dp(17),x+dp(2),bounds.centerY()+dp(17),dp(2),dp(2),paint);
     }
-    private void drawIcon(Canvas canvas,int i){
+    private void drawIcon(Canvas canvas,int i,float strength){
         float t=FanGeometry.clamp((progress-points[i].delay)/(1-points[i].delay),0,1);
         if(t<.01f)return;
         float focus=emphasis[i],size=dp(iconDp)*(.28f+.72f*t)*(1+.23f*focus);
-        float strength=prefs.get("motion",100)/100f;
         float rotation=((i%2==0?1:-1)*(32+i*2)*(1-t)+points[i].rotation*t)*strength*(1-focus);
         canvas.save();canvas.translate(xs[i],ys[i]);canvas.rotate(rotation);
         paint.setAlpha((int)(255*t));
@@ -236,11 +237,12 @@ final class BloomView extends View implements Choreographer.FrameCallback {
             canvas.drawRoundRect(-size*.62f,-size*.62f,size*.62f,size*.62f,dp(20),dp(20),paint);
         }
         paint.setColor(Color.WHITE);paint.setAlpha(255);
-        canvas.drawBitmap(apps.get(i).icon,null,new RectF(-size/2,-size/2,size/2,size/2),paint);
+        iconBounds.set(-size/2,-size/2,size/2,size/2);
+        canvas.drawBitmap(apps.get(i).icon,null,iconBounds,paint);
         paint.setAlpha(255);canvas.restore();
     }
     private void drawLabel(Canvas canvas,String text,float x,float y){
-        paint.setTextSize(dp(13));paint.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));
+        paint.setTextSize(dp(13));paint.setTypeface(labelTypeface);
         if(text.length()>20)text=text.substring(0,19)+"…";
         float half=paint.measureText(text)/2+dp(12);
         x=FanGeometry.clamp(x,half+dp(6),getWidth()-half-dp(6));y=Math.max(dp(26),y);

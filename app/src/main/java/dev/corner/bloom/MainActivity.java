@@ -6,6 +6,7 @@ import android.content.*;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.*;
 import android.provider.Settings;
@@ -16,13 +17,16 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public final class MainActivity extends Activity {
-    private static final int BG=0xff101119,CARD=0xff1b1c29,INK=0xfff2efff,MUTED=0xffa6a4b8,PURPLE=0xffb6a1ff;
+    private int BG=0xfff5f5f5,CARD=0xffffffff,INK=0xff181818,MUTED=0xff858585,PURPLE=0xff3478f6;
     private Prefs prefs;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private List<AppEntry> all=new ArrayList<>();
-    private BloomView practice;
     private TextView status,appsSummary,bootHint,tapHint;
-    private Button start;
+    private Switch master;
+    private Dialog pickerDialog;
+    private PageHost pages;
+    private PageHost.Page settingsPage,positionPage;
+    private android.window.OnBackInvokedCallback backCallback;
     private boolean ready;
     private final Handler ui=new Handler(Looper.getMainLooper());
     private EditText holdTest;
@@ -36,8 +40,15 @@ public final class MainActivity extends Activity {
     int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}
     @Override public void onCreate(Bundle state){
         super.onCreate(state);prefs=new Prefs(this);prefs.migrateInputV3();prefs.recoverTapMode();
+        if((getResources().getConfiguration().uiMode&android.content.res.Configuration.UI_MODE_NIGHT_MASK)==android.content.res.Configuration.UI_MODE_NIGHT_YES){
+            BG=0xff111111;CARD=0xff1c1c1e;INK=0xfff2f2f2;MUTED=0xff96969c;
+        }
         getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
         makeScreen();
+        if(Build.VERSION.SDK_INT>=33){
+            backCallback=this::goBack;
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,backCallback);
+        }
         applyRecentsPreference();
         worker.execute(()->{
             List<AppEntry> loaded=AppEntry.load(this);
@@ -45,6 +56,11 @@ public final class MainActivity extends Activity {
         });
     }
     private GradientDrawable background(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
+    private void pressFeedback(View view){
+        view.setBackground(new RippleDrawable(android.content.res.ColorStateList.valueOf((INK&0xffffff)|0x14000000),
+                null,background(0xffffffff,12)));view.setFocusable(true);
+    }
+    private void updateText(TextView view,String value){if(!value.contentEquals(view.getText()))view.setText(value);}
     private TextView text(String value,int size,int color){
         TextView t=new TextView(this);t.setText(value);t.setTextSize(size);t.setTextColor(color);t.setLineSpacing(dp(3),1);return t;
     }
@@ -56,57 +72,149 @@ public final class MainActivity extends Activity {
     private void title(LinearLayout parent,String s){TextView t=text(s,18,INK);t.setTypeface(null,Typeface.BOLD);parent.addView(t);}
     private void gap(LinearLayout p,int h){p.addView(new View(this),new LinearLayout.LayoutParams(1,dp(h)));}
     private Button button(String label,boolean primary){
-        Button b=new Button(this);b.setText(label);b.setAllCaps(false);b.setTextSize(14);b.setTextColor(primary?0xff211938:INK);
-        b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(primary?PURPLE:0xff343344));
+        Button b=new Button(this);b.setText(label);b.setAllCaps(false);b.setTextSize(14);b.setTextColor(primary?0xffffffff:INK);
+        b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(primary?PURPLE:BG));
         b.setMinHeight(dp(48));return b;
     }
     private void makeScreen(){
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(BG);
-        LinearLayout content=column();content.setPadding(dp(20),dp(22),dp(20),dp(28));content.setFocusableInTouchMode(true);content.requestFocus();scroll.addView(content);
-        if(Build.VERSION.SDK_INT>=30){
-            scroll.setOnApplyWindowInsetsListener((v,insets)->{
-                android.graphics.Insets b=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());
-                v.setPadding(b.left,b.top,b.right,b.bottom);return insets;
-            });
-        }
-        TextView eyebrow=text("CORNER BLOOM  /  0.2.1",11,PURPLE);eyebrow.setLetterSpacing(.17f);content.addView(eyebrow);gap(content,9);
-        TextView name=text("角落绽放",32,INK);name.setTypeface(null,Typeface.BOLD);content.addView(name);gap(content,7);
-        content.addView(text("轻轻一划，让常用应用从指尖散开。",14,MUTED));gap(content,22);
-
-        LinearLayout setup=card(content);title(setup,"让入口就位");gap(setup,8);
-        status=text("正在读取本机应用…",13,MUTED);setup.addView(status);gap(setup,12);
-        start=button("开启角落手势",true);setup.addView(start,new LinearLayout.LayoutParams(-1,dp(50)));
-        start.setOnClickListener(v->toggleService());
-        Button restore=button("入口不见了？恢复入口",false);setup.addView(restore,new LinearLayout.LayoutParams(-1,dp(48)));
+        LinearLayout content=column();content.setPadding(dp(22),dp(18),dp(22),dp(24));
+        content.setFocusableInTouchMode(true);content.requestFocus();scroll.addView(content);
+        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView name=text("角落绽放",32,INK);name.setTypeface(null,Typeface.BOLD);
+        header.addView(name,new LinearLayout.LayoutParams(0,-2,1));
+        TextView restore=text("恢复入口",14,PURPLE);restore.setGravity(Gravity.CENTER);
+        pressFeedback(restore);
         restore.setOnClickListener(v->startOverlay(OverlayService.RESTORE));
-        Button permission=button("悬浮窗权限",false);setup.addView(permission,new LinearLayout.LayoutParams(-1,dp(48)));
-        permission.setOnClickListener(v->openOverlayPermission());
-        gap(setup,5);setup.addView(text("入口默认在右下角，底部预留 36 dp。若与系统手势冲突，可以在下方挪动入口。",12,MUTED));
-        setup.addView(text("恢复入口会重新挂载悬浮窗。其他悬浮窗可能遮住亮条；安全页面也可能由系统暂时隐藏悬浮窗，离开后再试。",12,MUTED));
+        header.addView(restore,new LinearLayout.LayoutParams(dp(76),dp(48)));content.addView(header);
+        gap(content,6);content.addView(text("让常用应用触手可及",14,MUTED));gap(content,24);
 
-        LinearLayout background=card(content);title(background,"后台与启动");gap(background,8);
+        LinearLayout stateCard=card(content);
+        LinearLayout stateRow=new LinearLayout(this);stateRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout stateText=column();title(stateText,"角落手势");gap(stateText,6);
+        status=text("正在读取应用…",12,MUTED);stateText.addView(status);
+        stateRow.addView(stateText,new LinearLayout.LayoutParams(0,-2,1));
+        master=new Switch(this);master.setContentDescription("开启或关闭角落手势");
+        stateRow.addView(master,new LinearLayout.LayoutParams(-2,dp(52)));stateCard.addView(stateRow);
+        master.setOnClickListener(v->toggleService());
+        section(content,"配置");
+        LinearLayout configure=card(content);configure.setPadding(dp(18),0,dp(18),0);
+        appsSummary=navigationRow(configure,"常用应用","正在读取…",this::showAppsSettings);
+        divider(configure);
+        navigationRow(configure,"位置与排列","拖动预览，调整入口与图标",this::showPositionEditor);
+        divider(configure);
+        navigationRow(configure,"外观与手感","动画、雾效、亮条与震动",this::showAppearanceSettings);
+        section(content,"服务");
+        LinearLayout services=card(content);services.setPadding(dp(18),0,dp(18),0);
+        navigationRow(services,"显示与穿透","入口模式、轻点和长按删除",this::showInputSettings);
+        divider(services);
+        navigationRow(services,"后台与启动","开机启动与最近任务",this::showBackgroundSettings);
+        gap(content,5);
+        TextView version=text("角落绽放  0.2.5",12,MUTED);version.setGravity(Gravity.CENTER);
+        content.addView(version);
+        pages=new PageHost(this,BG);applyInsets(pages);pages.setRoot(scroll);setContentView(pages);
+    }
+    private void applyInsets(View root){
+        if(Build.VERSION.SDK_INT>=30)root.setOnApplyWindowInsetsListener((v,insets)->{
+            android.graphics.Insets bars=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());
+            v.setPadding(bars.left,bars.top,bars.right,bars.bottom);return insets;
+        });
+    }
+    private void section(LinearLayout parent,String label){
+        TextView t=text(label,13,MUTED);t.setPadding(dp(4),dp(4),0,dp(9));parent.addView(t);
+    }
+    private void divider(LinearLayout parent){
+        View line=new View(this);line.setBackgroundColor(BG);parent.addView(line,new LinearLayout.LayoutParams(-1,dp(1)));
+    }
+    private TextView navigationRow(LinearLayout parent,String label,String detail,Runnable action){
+        LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0,dp(12),0,dp(12));row.setMinimumHeight(dp(64));
+        LinearLayout labels=column();TextView heading=text(label,16,INK);labels.addView(heading);
+        TextView summary=text(detail,12,MUTED);labels.addView(summary);
+        row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+        TextView chevron=text("›",26,MUTED);chevron.setPadding(dp(14),0,0,0);row.addView(chevron);
+        pressFeedback(row);
+        row.setOnClickListener(v->{if(pages.canPush())action.run();});parent.addView(row,new LinearLayout.LayoutParams(-1,-2));
+        return summary;
+    }
+    private LinearLayout openSettingsPage(String label){
+        if(settingsPage!=null)settingsPage.closeImmediately();
+        LinearLayout root=column();root.setBackgroundColor(BG);
+        LinearLayout bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);bar.setPadding(dp(16),dp(8),dp(20),dp(8));
+        TextView back=text("‹",34,INK);back.setGravity(Gravity.CENTER);back.setContentDescription("返回");
+        pressFeedback(back);
+        bar.addView(back,new LinearLayout.LayoutParams(dp(42),dp(48)));back.setOnClickListener(v->goBack());
+        TextView heading=text(label,22,INK);heading.setTypeface(null,Typeface.BOLD);bar.addView(heading);
+        root.addView(bar);
+        ScrollView scroll=new ScrollView(this);LinearLayout body=column();body.setPadding(dp(22),dp(14),dp(22),dp(24));
+        scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        settingsPage=pages.push(root,page->{
+            if(settingsPage==page){cancelCalibration();tapHint=null;bootHint=null;holdTest=null;settingsPage=null;}
+        });
+        return body;
+    }
+    private void showAppsSettings(){
+        LinearLayout body=openSettingsPage("常用应用");
+        LinearLayout apps=card(body);title(apps,"常用应用");gap(apps,10);
+        apps.addView(text("最多选择 15 个应用。图标位置在可视化预览中拖动调整。",13,MUTED));gap(apps,12);
+        Button choose=button("选择应用",true);apps.addView(choose,new LinearLayout.LayoutParams(-1,dp(50)));
+        choose.setOnClickListener(v->{if(ready)showPicker();});
+        Button order=button("拖动调整图标排列",false);apps.addView(order,new LinearLayout.LayoutParams(-1,dp(50)));
+        order.setOnClickListener(v->showPositionEditor());
+    }
+    private void showAppearanceSettings(){
+        LinearLayout body=openSettingsPage("外观与手感");
+        section(body,"展开动画");LinearLayout motion=card(body);
+        slider(motion,"展开范围","spread",80,115,100,"%");
+        slider(motion,"旋转与回弹","motion",0,150,100,"%");
+        toggle(motion,"滑过图标时轻震","haptic",true);
+        section(body,"背景");LinearLayout fog=card(body);
+        slider(fog,"雾效强度 · 0% 关闭","fog_strength",0,50,22,"%");
+        slider(fog,"雾效边缘柔和度","fog_feather",60,180,120,"dp");
+        section(body,"手势入口");LinearLayout handle=card(body);
+        toggle(handle,"显示入口亮条","guide",true);
+        slider(handle,"触发宽度","width",8,100,16,"dp");
+        slider(handle,"触发高度","height",40,180,88,"dp");
+    }
+    private void showBackgroundSettings(){
+        LinearLayout body=openSettingsPage("后台与启动");
+        LinearLayout background=card(body);
         Switch hide=preferenceSwitch(background,"在最近任务中隐藏","hide_recents",false);
         hide.setOnCheckedChangeListener((v,checked)->{prefs.set("hide_recents",checked);applyRecentsPreference();});
-        background.addView(text("隐藏应用设置页的最近任务卡片；仍可通过桌面图标或运行通知打开。",12,MUTED));gap(background,8);
+        divider(background);
         Switch boot=preferenceSwitch(background,"开机自动启动","start_on_boot",false);
         boot.setOnCheckedChangeListener((v,checked)->{
             prefs.set("start_on_boot",checked);refreshBootHint();
-            if(checked&&!Settings.canDrawOverlays(this))Toast.makeText(this,"请先允许悬浮窗权限，开机后才能显示入口",Toast.LENGTH_LONG).show();
+            if(checked&&!prefs.get("accessibility_overlay",false)&&!Settings.canDrawOverlays(this))
+                Toast.makeText(this,"请先允许悬浮窗权限",Toast.LENGTH_LONG).show();
             if(checked&&Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
                 requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},42);
         });
-        bootHint=text("",12,MUTED);background.addView(bootHint);refreshBootHint();gap(background,8);
-        Button systemSettings=button("打开系统应用设置",false);background.addView(systemSettings,new LinearLayout.LayoutParams(-1,dp(48)));
-        systemSettings.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName()))));
-
-        LinearLayout tapCard=card(content);title(tapCard,"轻点与上滑分开处理");gap(tapCard,8);
-        Switch pass=preferenceSwitch(tapCard,"轻点穿透（需无障碍）","tap_through",false);
+        bootHint=text("",12,MUTED);body.addView(bootHint);refreshBootHint();gap(body,16);
+        Button system=button("系统应用设置",false);body.addView(system,new LinearLayout.LayoutParams(-1,dp(48)));
+        system.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName()))));
+    }
+    private void showInputSettings(){
+        LinearLayout body=openSettingsPage("显示与穿透");
+        section(body,"入口显示");LinearLayout display=card(body);
+        Switch mode=preferenceSwitch(display,"通过无障碍显示入口","accessibility_overlay",false);
+        mode.setOnCheckedChangeListener((v,checked)->{
+            cancelCalibration();prefs.set("accessibility_overlay",checked);refreshStatus();
+            if(checked&&!TapAccessibilityService.available())startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            else if(!checked&&!Settings.canDrawOverlays(this))openOverlayPermission();
+        });
+        display.addView(text("无障碍入口可减少普通悬浮窗的系统提醒。服务断开时暂停入口，重连后恢复。",12,MUTED));
+        gap(display,8);
+        Button permission=button("悬浮窗权限",false);display.addView(permission,new LinearLayout.LayoutParams(-1,dp(48)));
+        permission.setOnClickListener(v->openOverlayPermission());
+        section(body,"输入辅助");LinearLayout tap=card(body);
+        Switch pass=preferenceSwitch(tap,"轻点穿透","tap_through",false);
         pass.setOnCheckedChangeListener((v,checked)->{
             prefs.set("tap_through",checked);refreshTapHint();
             if(checked&&!TapAccessibilityService.available())startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
         });
-        Switch hold=preferenceSwitch(tapCard,"按住删除键连续删（免 Root）","hold_delete",false);
-        hold.setEnabled(Build.VERSION.SDK_INT>=33);
+        divider(tap);
+        Switch hold=preferenceSwitch(tap,"按住删除键连续删","hold_delete",false);hold.setEnabled(Build.VERSION.SDK_INT>=33);
         hold.setOnCheckedChangeListener((v,checked)->{
             prefs.set("hold_delete",checked);
             if(checked){
@@ -115,69 +223,73 @@ public final class MainActivity extends Activity {
             }
             TapAccessibilityService.updateDeleteMode(checked);refreshTapHint();
         });
-        tapCard.addView(text("适用于底部固定的文字键盘。开启后先标记删除键位置；在入口覆盖删除键的区域按住即可连续删除，松手停止，滑动取消。切换符号、表情等布局后需重新标记。",12,MUTED));gap(tapCard,8);
+        tap.addView(text("需无障碍服务，无需 Root。长按删除支持 Android 13+，先标记键盘删除键；更换键盘布局后需重新标记。",12,MUTED));
+        gap(tap,12);
         holdTest=new EditText(this);holdTest.setTextColor(INK);holdTest.setTextSize(14);
-        holdTest.setText("在这里测试长按删除，松手后应该停止。");holdTest.setSingleLine(false);
-        holdTest.setMinLines(2);tapCard.addView(holdTest,new LinearLayout.LayoutParams(-1,-2));
+        holdTest.setText("在这里测试长按删除，松手后应该停止。");holdTest.setMinLines(2);tap.addView(holdTest,new LinearLayout.LayoutParams(-1,-2));
         Button mark=button("标记键盘删除键",false);mark.setEnabled(Build.VERSION.SDK_INT>=33);
-        tapCard.addView(mark,new LinearLayout.LayoutParams(-1,dp(48)));
+        tap.addView(mark,new LinearLayout.LayoutParams(-1,dp(48)));
         mark.setOnClickListener(v->{
-            if(!hold.isChecked()){hold.setChecked(true);if(!TapAccessibilityService.available())return;}
-            beginCalibration();
+            if(!hold.isChecked()){hold.setChecked(true);if(!TapAccessibilityService.available())return;}beginCalibration();
         });
-        tapHint=text("",12,MUTED);tapCard.addView(tapHint);refreshTapHint();gap(tapCard,8);
-        Button accessibility=button("打开无障碍设置",false);tapCard.addView(accessibility,new LinearLayout.LayoutParams(-1,dp(48)));
+        tapHint=text("",12,MUTED);body.addView(tapHint);refreshTapHint();gap(body,16);
+        Button accessibility=button("系统无障碍设置",false);body.addView(accessibility,new LinearLayout.LayoutParams(-1,dp(48)));
         accessibility.setOnClickListener(v->startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-
-        LinearLayout preview=card(content);title(preview,"先在这里试一划");gap(preview,5);
-        preview.addView(text("练习区只提示选择结果，放心试手感。",12,MUTED));gap(preview,12);
-        practice=new BloomView(this,prefs,false,new BloomView.Host(){
-            public void expand(){} public void collapse(){}
-            public void launch(AppEntry app){Toast.makeText(MainActivity.this,"已选中「"+app.name+"」",Toast.LENGTH_SHORT).show();}
+    }
+    private void showPositionEditor(){
+        if(!ready){Toast.makeText(this,"应用列表还在读取，请稍等",Toast.LENGTH_SHORT).show();return;}
+        List<AppEntry> favorites=AppEntry.favorites(all,prefs);
+        if(favorites.isEmpty()){Toast.makeText(this,"先选择几个常用应用",Toast.LENGTH_SHORT).show();return;}
+        if(positionPage!=null||!pages.canPush())return;
+        cancelCalibration();
+        ((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE))
+                .hideSoftInputFromWindow(getWindow().getDecorView().getWindowToken(),0);
+        android.util.DisplayMetrics metrics=new android.util.DisplayMetrics();
+        ((WindowManager)getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(metrics);
+        ArrangementDraft draft=new ArrangementDraft(metrics.widthPixels/metrics.density,metrics.heightPixels/metrics.density,
+                prefs.get("width",16),prefs.get("height",88),prefs.get("right",0),prefs.get("bottom",36),favorites.size());
+        LinearLayout root=column();root.setBackgroundColor(BG);
+        LinearLayout heading=column();heading.setPadding(dp(24),dp(20),dp(24),dp(6));
+        title(heading,"位置与排列");gap(heading,6);
+        heading.addView(text("拖动亮条移动入口，拖动图标交换位置",13,MUTED));root.addView(heading);
+        TextView detail=text("",12,MUTED);detail.setGravity(Gravity.CENTER);detail.setPadding(dp(8),dp(5),dp(8),dp(8));
+        Runnable update=()->updateText(detail,"距右边 "+draft.right+" dp   ·   距底部 "+draft.bottom+" dp");
+        PositionEditorView editor=new PositionEditorView(this,draft,favorites,prefs.get("spread",100)/100f,update::run);
+        root.addView(editor,new LinearLayout.LayoutParams(-1,0,1));root.addView(detail);
+        LinearLayout actions=new LinearLayout(this);actions.setPadding(dp(18),dp(4),dp(18),dp(14));
+        Button cancel=button("取消",false),reset=button("重置入口",false),save=button("保存",true);
+        for(Button b:new Button[]{cancel,reset,save}){
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(50),1);lp.setMargins(dp(4),0,dp(4),0);actions.addView(b,lp);
+        }
+        root.addView(actions);update.run();
+        cancel.setOnClickListener(v->goBack());reset.setOnClickListener(v->editor.resetPosition());
+        save.setOnClickListener(v->{
+            List<String> ids=new ArrayList<>();for(int index:draft.order)ids.add(favorites.get(index).id());
+            prefs.arrangement(draft.right,draft.bottom,ids);refreshApps();goBack();
         });
-        practice.setBackground(background(0xff12131e,18));
-        preview.addView(practice,new LinearLayout.LayoutParams(-1,dp(390)));
-
-        LinearLayout apps=card(content);title(apps,"你的常用应用");gap(apps,7);
-        appsSummary=text("正在读取…",13,MUTED);apps.addView(appsSummary);gap(apps,10);
-        Button choose=button("选择应用 · 最多 15 个",true);apps.addView(choose,new LinearLayout.LayoutParams(-1,dp(48)));
-        choose.setOnClickListener(v->{if(ready)showPicker();});
-        Button order=button("调整排列顺序",false);apps.addView(order,new LinearLayout.LayoutParams(-1,dp(48)));
-        order.setOnClickListener(v->{if(ready)showOrder();});
-
-        LinearLayout position=card(content);title(position,"把入口挪到顺手的位置");gap(position,9);
-        slider(position,"距右边", "right",0,180,0,"dp");
-        slider(position,"距底部", "bottom",24,260,36,"dp");
-        slider(position,"触发宽度", "width",8,100,16,"dp");
-        slider(position,"触发高度", "height",40,180,88,"dp");
-        toggle(position,"显示入口亮条","guide",true);
-        gap(position,6);position.addView(text("默认窄入口。开启穿透并授权后，入口覆盖在键盘上，保持原位置；未开启时仍由键盘优先接收点击。",12,MUTED));
-
-        LinearLayout motion=card(content);title(motion,"调出你的手感");gap(motion,9);
-        slider(motion,"展开范围","spread",80,115,100,"%");
-        slider(motion,"旋转与回弹","motion",0,150,100,"%");
-        slider(motion,"局部雾效 · 0% 关闭","fog_strength",0,50,22,"%");
-        slider(motion,"雾效边缘柔和度","fog_feather",60,180,120,"dp");
-        toggle(motion,"滑过图标时轻震","haptic",true);
-        gap(motion,8);motion.addView(text("上划展开 → 滑到图标 → 松手打开\n滑回角落，或在没有高亮图标时松手，即可取消。",13,MUTED));
-
-        TextView footer=text("为单手操作而做 · 本地运行\n首次在一加手机上使用，建议先保留系统手势，通过位置设置避开；如果容易关闭，也可以关闭原有手势。",12,MUTED);
-        footer.setGravity(Gravity.CENTER);content.addView(footer);setContentView(scroll);
+        OverlayService.positionEditorVisible(true);
+        try{
+            positionPage=pages.push(root,page->{
+                editor.cancelDrag();if(positionPage==page)positionPage=null;
+                OverlayService.positionEditorVisible(false);
+            });
+            if(positionPage==null)OverlayService.positionEditorVisible(false);
+        }catch(RuntimeException e){positionPage=null;OverlayService.positionEditorVisible(false);throw e;}
     }
     private void slider(LinearLayout parent,String label,String key,int min,int max,int fallback,String unit){
         TextView value=text(label+"  "+prefs.get(key,fallback)+" "+unit,13,INK);parent.addView(value);
         SeekBar bar=new SeekBar(this);bar.setMax(max-min);bar.setProgress(prefs.get(key,fallback)-min);
         parent.addView(bar,new LinearLayout.LayoutParams(-1,dp(40)));
         bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-            public void onProgressChanged(SeekBar s,int n,boolean from){value.setText(label+"  "+(n+min)+" "+unit);}
+            public void onProgressChanged(SeekBar s,int n,boolean from){updateText(value,label+"  "+(n+min)+" "+unit);}
             public void onStartTrackingTouch(SeekBar s){}
-            public void onStopTrackingTouch(SeekBar s){prefs.set(key,s.getProgress()+min);practice.reset();refreshApps();}
+            public void onStopTrackingTouch(SeekBar s){prefs.set(key,s.getProgress()+min);}
         });
     }
     private void toggle(LinearLayout parent,String label,String key,boolean fallback){
         Switch s=new Switch(this);s.setText(label);s.setTextColor(INK);s.setTextSize(13);s.setChecked(prefs.get(key,fallback));
         parent.addView(s,new LinearLayout.LayoutParams(-1,dp(46)));
-        s.setOnCheckedChangeListener((v,checked)->{prefs.set(key,checked);practice.invalidate();});
+        s.setOnCheckedChangeListener((v,checked)->{prefs.set(key,checked);});
     }
     private Switch preferenceSwitch(LinearLayout parent,String label,String key,boolean fallback){
         Switch s=new Switch(this);s.setText(label);s.setTextColor(INK);s.setTextSize(13);s.setChecked(prefs.get(key,fallback));
@@ -192,10 +304,11 @@ public final class MainActivity extends Activity {
     private void refreshBootHint(){
         if(bootHint==null)return;
         String hint=!prefs.get("start_on_boot",false)?"开启后，在开机并解锁后自动恢复悬浮入口。":
-                !Settings.canDrawOverlays(this)?"请先允许悬浮窗权限，自启动才能显示入口。":
+                !prefs.get("accessibility_overlay",false)&&!Settings.canDrawOverlays(this)?"请先允许悬浮窗权限，自启动才能显示入口。":
                 prefs.get("boot_failed",false)?"上次自动启动未能完成，请检查悬浮窗权限及系统的自启动、后台运行设置。":
                 "已开启：开机并解锁后自动恢复入口。若未生效，请在系统应用设置中允许自启动和后台运行。";
-        bootHint.setText(hint);
+        if(prefs.get("accessibility_overlay",false)&&prefs.get("start_on_boot",false))hint+="\n无障碍模式需等待对应服务连接后才能显示入口。";
+        updateText(bootHint,hint);
     }
     private void refreshTapHint(){
         if(tapHint==null)return;
@@ -204,10 +317,10 @@ public final class MainActivity extends Activity {
                 "轻点服务已就绪，上滑仍展开。\n"+TapAccessibilityService.lastTapHint();
         if(prefs.get("hold_delete",false))hint+="\n"+(prefs.get("delete_w",0)==0?"长按删除：请先标记删除键":
                 "长按删除：已标记；键盘显示且入口覆盖删除键时生效")+"\n"+TapAccessibilityService.lastDeleteHint();
-        tapHint.setText(hint);
+        updateText(tapHint,hint);
     }
     private void beginCalibration(){
-        if(!Settings.canDrawOverlays(this)){openOverlayPermission();return;}
+        if(!prefs.get("accessibility_overlay",false)&&!Settings.canDrawOverlays(this)){openOverlayPermission();return;}
         if(!TapAccessibilityService.available()){
             Toast.makeText(this,"请先开启点击穿透的无障碍服务，再回来标记",Toast.LENGTH_LONG).show();
             startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));return;
@@ -233,6 +346,10 @@ public final class MainActivity extends Activity {
     }
     private void showCalibration(){
         if(calibration!=null)return;
+        boolean accessibilityMode=prefs.get("accessibility_overlay",false);
+        calibrationWm=accessibilityMode?TapAccessibilityService.overlayWindowManager():
+                (WindowManager)getApplicationContext().getSystemService(WINDOW_SERVICE);
+        if(calibrationWm==null){Toast.makeText(this,"无障碍服务已断开，请重新开启后再标记",Toast.LENGTH_LONG).show();return;}
         calibration=new View(this){
             final android.graphics.Paint p=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
             @Override protected void onDraw(android.graphics.Canvas c){
@@ -265,7 +382,8 @@ public final class MainActivity extends Activity {
             Toast.makeText(this,"已标记。开启角落手势后，按住入口覆盖删除键的位置测试",Toast.LENGTH_LONG).show();
             return true;
         });
-        WindowManager.LayoutParams params=new WindowManager.LayoutParams(-1,-1,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        WindowManager.LayoutParams params=new WindowManager.LayoutParams(-1,-1,accessibilityMode?
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY:WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 android.graphics.PixelFormat.TRANSLUCENT);
         params.gravity=Gravity.TOP|Gravity.LEFT;params.softInputMode=WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING;
@@ -292,7 +410,12 @@ public final class MainActivity extends Activity {
     private void startOverlay(String action){
         if(!ready){Toast.makeText(this,"应用列表还在读取，请稍等",Toast.LENGTH_SHORT).show();return;}
         if(AppEntry.favorites(all,prefs).isEmpty()){Toast.makeText(this,"先选择几个常用应用",Toast.LENGTH_SHORT).show();return;}
-        if(!Settings.canDrawOverlays(this)){openOverlayPermission();return;}
+        if(prefs.get("accessibility_overlay",false)){
+            if(!TapAccessibilityService.available()){
+                Toast.makeText(this,"请先开启「角落绽放 · 点击穿透」无障碍服务",Toast.LENGTH_LONG).show();
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));return;
+            }
+        }else if(!Settings.canDrawOverlays(this)){openOverlayPermission();return;}
         if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},42);
         try{startForegroundService(new Intent(this,OverlayService.class).setAction(action));}
@@ -301,72 +424,78 @@ public final class MainActivity extends Activity {
     }
     private void refreshStatus(){
         boolean on=OverlayService.running;
-        start.setText(on||prefs.get("overlay_enabled",false)?"关闭角落手势":"开启角落手势");
-        status.setText(!Settings.canDrawOverlays(this)?"请允许悬浮窗权限，再恢复入口":on?OverlayService.statusHint:
+        boolean checked=on||prefs.get("overlay_enabled",false);
+        if(master.isChecked()!=checked)master.setChecked(checked);
+        boolean accessibilityMode=prefs.get("accessibility_overlay",false);
+        updateText(status,accessibilityMode&&!TapAccessibilityService.available()?"请开启无障碍服务，再恢复入口":
+                !accessibilityMode&&!Settings.canDrawOverlays(this)?"请允许悬浮窗权限，再恢复入口":on?OverlayService.statusHint:
                 prefs.get("overlay_enabled",false)?"服务已停止，可点恢复入口重新开启":"角落手势未开启");
-        status.setTextColor(on?0xff83e6cb:MUTED);
+        int color=on?PURPLE:MUTED;if(status.getCurrentTextColor()!=color)status.setTextColor(color);
     }
     private void refreshApps(){
-        List<AppEntry> favorites=AppEntry.favorites(all,prefs);practice.setApps(favorites);
-        StringBuilder summary=new StringBuilder("已选 "+favorites.size()+" / 15");
-        for(int i=0;i<favorites.size();i++)summary.append(i==0?"\n":" · ").append(favorites.get(i).name);
-        if(favorites.isEmpty())summary.append("\n点击下面选择应用。");appsSummary.setText(summary);
+        List<AppEntry> favorites=AppEntry.favorites(all,prefs);
+        updateText(appsSummary,favorites.isEmpty()?"点击选择应用":"已选择 "+favorites.size()+" 个应用");
     }
     private void showPicker(){
+        if(pickerDialog!=null||pages.isTransitioning())return;
         List<String> selected=new ArrayList<>();for(AppEntry a:AppEntry.favorites(all,prefs))selected.add(a.id());
         LinearLayout body=column();body.setPadding(dp(18),dp(8),dp(18),0);
+        body.setFocusableInTouchMode(true);body.requestFocus();
         TextView count=text("",13,MUTED);body.addView(count);
         TextView hint=text("按添加顺序排列，点已选应用可移除。",12,MUTED);body.addView(hint);
         EditText search=new EditText(this);search.setSingleLine();search.setTextColor(INK);search.setHintTextColor(MUTED);search.setHint("搜索应用");body.addView(search);
         ListView list=new ListView(this);list.setDividerHeight(0);body.addView(list,new LinearLayout.LayoutParams(-1,dp(330)));
         List<AppEntry> shown=new ArrayList<>(all);
+        List<String> names=new ArrayList<>();for(AppEntry a:all)names.add(a.name.toLowerCase(Locale.ROOT));
         android.widget.BaseAdapter adapter=new android.widget.BaseAdapter(){
             public int getCount(){return shown.size();}public Object getItem(int p){return shown.get(p);}public long getItemId(int p){return p;}
             public View getView(int p,View old,android.view.ViewGroup parent){
-                AppEntry a=shown.get(p);LinearLayout row=new LinearLayout(MainActivity.this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(0,dp(8),0,dp(8));
-                ImageView icon=new ImageView(MainActivity.this);icon.setImageBitmap(a.icon);row.addView(icon,new LinearLayout.LayoutParams(dp(36),dp(36)));
-                TextView label=text(a.name,14,INK);label.setPadding(dp(12),0,0,0);row.addView(label,new LinearLayout.LayoutParams(0,-2,1));
-                int index=selected.indexOf(a.id());TextView mark=text(index<0?"＋":String.valueOf(index+1),16,index<0?MUTED:PURPLE);mark.setGravity(Gravity.CENTER);row.addView(mark,new LinearLayout.LayoutParams(dp(36),dp(36)));return row;
+                AppEntry a=shown.get(p);AppRow holder;
+                if(old==null){
+                    LinearLayout row=new LinearLayout(MainActivity.this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(0,dp(8),0,dp(8));
+                    holder=new AppRow();holder.icon=new ImageView(MainActivity.this);row.addView(holder.icon,new LinearLayout.LayoutParams(dp(36),dp(36)));
+                    holder.label=text("",14,INK);holder.label.setPadding(dp(12),0,0,0);row.addView(holder.label,new LinearLayout.LayoutParams(0,-2,1));
+                    holder.mark=text("",16,MUTED);holder.mark.setGravity(Gravity.CENTER);row.addView(holder.mark,new LinearLayout.LayoutParams(dp(36),dp(36)));
+                    row.setTag(holder);old=row;
+                }else holder=(AppRow)old.getTag();
+                holder.icon.setImageBitmap(a.icon);updateText(holder.label,a.name);
+                int index=selected.indexOf(a.id());updateText(holder.mark,index<0?"＋":String.valueOf(index+1));
+                holder.mark.setTextColor(index<0?MUTED:PURPLE);return old;
             }
         };list.setAdapter(adapter);
-        Runnable update=()->{count.setText("已选 "+selected.size()+" / 15");adapter.notifyDataSetChanged();};update.run();
+        Runnable update=()->{updateText(count,"已选 "+selected.size()+" / 15");adapter.notifyDataSetChanged();};update.run();
         list.setOnItemClickListener((p,v,pos,id)->{
             String key=shown.get(pos).id();if(selected.contains(key))selected.remove(key);
             else if(selected.size()<15)selected.add(key);else Toast.makeText(this,"第一层最多放 15 个",Toast.LENGTH_SHORT).show();update.run();
         });
         search.addTextChangedListener(new TextWatcher(){
+            private String query="";
             public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int before,int n){
-                String q=s.toString().toLowerCase(Locale.ROOT);shown.clear();for(AppEntry a:all)if(a.name.toLowerCase(Locale.ROOT).contains(q))shown.add(a);adapter.notifyDataSetChanged();
+                String q=s.toString().toLowerCase(Locale.ROOT);if(q.equals(query))return;query=q;
+                shown.clear();for(int i=0;i<all.size();i++)if(names.get(i).contains(q))shown.add(all.get(i));adapter.notifyDataSetChanged();
             }public void afterTextChanged(Editable e){}
         });
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("选择常用应用").setView(body).setNegativeButton("取消",null)
-                .setPositiveButton("保存",(d,w)->{prefs.selected(selected);practice.reset();refreshApps();}).create();
-        dialog.setOnShowListener(d->{dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);});dialog.show();
+                .setPositiveButton("保存",(d,w)->{prefs.selected(selected);refreshApps();}).create();
+        pickerDialog=dialog;dialog.setOnDismissListener(d->{if(pickerDialog==dialog)pickerDialog=null;});
+        if(!android.animation.ValueAnimator.areAnimatorsEnabled())dialog.getWindow().setWindowAnimations(0);
+        dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);dialog.show();
     }
-    private void showOrder(){
-        List<AppEntry> ordered=new ArrayList<>(AppEntry.favorites(all,prefs));
-        LinearLayout list=column();list.setPadding(dp(15),0,dp(15),0);ScrollView scroll=new ScrollView(this);scroll.addView(list);
-        Runnable[] render=new Runnable[1];render[0]=()->{
-            list.removeAllViews();
-            for(int i=0;i<ordered.size();i++){
-                final int index=i;LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
-                TextView name=text((i+1)+"  "+ordered.get(i).name,14,INK);row.addView(name,new LinearLayout.LayoutParams(0,-2,1));
-                Button up=button("↑",false);up.setMinWidth(0);up.setPadding(0,0,0,0);row.addView(up,new LinearLayout.LayoutParams(dp(48),dp(46)));
-                Button down=button("↓",false);down.setMinWidth(0);down.setPadding(0,0,0,0);row.addView(down,new LinearLayout.LayoutParams(dp(48),dp(46)));
-                up.setEnabled(i>0);down.setEnabled(i<ordered.size()-1);
-                up.setOnClickListener(v->{Collections.swap(ordered,index,index-1);render[0].run();});
-                down.setOnClickListener(v->{Collections.swap(ordered,index,index+1);render[0].run();});list.addView(row);
-            }
-        };render[0].run();
-        new AlertDialog.Builder(this).setTitle("调整顺序 · 内圈到外圈").setView(scroll).setNegativeButton("取消",null)
-                .setPositiveButton("保存",(d,w)->{List<String> ids=new ArrayList<>();for(AppEntry a:ordered)ids.add(a.id());prefs.selected(ids);practice.reset();refreshApps();}).show();
+    private static final class AppRow {ImageView icon;TextView label,mark;}
+    private void goBack(){
+        cancelCalibration();
+        View focused=getCurrentFocus();
+        if(focused!=null)((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE))
+                .hideSoftInputFromWindow(focused.getWindowToken(),0);
+        if(!pages.pop())finish();
     }
+    @Override public void onBackPressed(){goBack();}
     @Override public void onResume(){
         super.onResume();foreground=true;
         if(prefs!=null){
             applyRecentsPreference();
             // Only the visible Activity can request a fresh start after a vendor kill.
-            if(prefs.get("overlay_enabled",false)&&Settings.canDrawOverlays(this)){
+            if(prefs.get("overlay_enabled",false)&&(prefs.get("accessibility_overlay",false)||Settings.canDrawOverlays(this))){
                 try{startForegroundService(new Intent(this,OverlayService.class).setAction(OverlayService.CHECK));}
                 catch(RuntimeException e){android.util.Log.w("CornerBloom","Unable to check overlay from settings",e);}
             }
@@ -374,6 +503,14 @@ public final class MainActivity extends Activity {
         if(status!=null)refreshStatus();refreshBootHint();refreshTapHint();
         ui.removeCallbacks(refreshRuntime);ui.postDelayed(refreshRuntime,1000);
     }
-    @Override public void onPause(){foreground=false;ui.removeCallbacks(refreshRuntime);cancelCalibration();if(prefs!=null)applyRecentsPreference();super.onPause();}
-    @Override protected void onDestroy(){ui.removeCallbacksAndMessages(null);cancelCalibration();worker.shutdownNow();if(practice!=null)practice.reset();super.onDestroy();}
+    @Override public void onPause(){
+        foreground=false;ui.removeCallbacks(refreshRuntime);
+        if(positionPage!=null)positionPage.closeImmediately();if(pages!=null)pages.finishTransition();
+        cancelCalibration();if(prefs!=null)applyRecentsPreference();super.onPause();
+    }
+    @Override protected void onDestroy(){
+        ui.removeCallbacksAndMessages(null);if(pickerDialog!=null)pickerDialog.dismiss();
+        if(Build.VERSION.SDK_INT>=33&&backCallback!=null)getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backCallback);
+        if(pages!=null)pages.dispose();cancelCalibration();worker.shutdownNow();super.onDestroy();
+    }
 }

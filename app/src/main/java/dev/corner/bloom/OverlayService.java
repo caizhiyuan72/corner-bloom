@@ -17,7 +17,13 @@ public final class OverlayService extends Service {
     static final String RESTORE="dev.corner.bloom.RESTORE",CHECK="dev.corner.bloom.CHECK";
     static volatile boolean running;
     static volatile String statusHint="角落手势未开启";
+    private static boolean positionEditing;
+    private static Runnable editorChanged;
+    static void positionEditorVisible(boolean visible){
+        positionEditing=visible;if(editorChanged!=null)editorChanged.run();
+    }
     private WindowManager wm;
+    private WindowManager windowWm;
     private WindowManager.LayoutParams params;
     private BloomView view;
     private Prefs prefs;
@@ -43,6 +49,9 @@ public final class OverlayService extends Service {
     private final android.content.SharedPreferences.OnSharedPreferenceChangeListener changes=(sp,key)->{
         if("hide_recents".equals(key)||"start_on_boot".equals(key)||"boot_failed".equals(key)||"overlay_enabled".equals(key))return;
         if(view==null)return;
+        if("accessibility_overlay".equals(key)){
+            resetInteraction();recovery.request(true);scheduleHealth(0);return;
+        }
         if(deleteHold!=null)deleteHold.cancel();
         cancelTapReplay();
         touching=false;view.reset();
@@ -61,15 +70,17 @@ public final class OverlayService extends Service {
     };
     @Override public void onCreate(){
         super.onCreate();prefs=new Prefs(this);prefs.migrateInputV3();prefs.recoverTapMode();wm=(WindowManager)getSystemService(WINDOW_SERVICE);
+        windowWm=wm;
+        editorChanged=()->main.post(this::checkWindows);
         screenOff=!((PowerManager)getSystemService(POWER_SERVICE)).isInteractive();
         tapClassifier=new TapClassifier(Math.max(dp(8),ViewConfiguration.get(this).getScaledTouchSlop()));
         deleteHold=new DeleteHold((action,delay)->main.postDelayed(action,delay),
                 ViewConfiguration.getLongPressTimeout(),80,Math.max(dp(8),ViewConfiguration.get(this).getScaledTouchSlop()));
         TapAccessibilityService.setStateListener(()->main.post(()->{
-            if(view==null||!added)return;
+            if(view==null)return;
             deleteHold.cancel();
             touching=false;cancelTapReplay();view.reset();showExpanded(false);layoutWindows();
-            recovery.request(false);scheduleHealth(0);
+            recovery.request(accessibilityOverlay());scheduleHealth(0);
         }));
         NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
         NotificationChannel channel=new NotificationChannel("gesture","角落手势",NotificationManager.IMPORTANCE_LOW);
@@ -96,7 +107,7 @@ public final class OverlayService extends Service {
         if((intent==null||CHECK.equals(action))&&!prefs.get("overlay_enabled",false)){
             running=false;stopSelf();return START_NOT_STICKY;
         }
-        if(!Settings.canDrawOverlays(this)){
+        if(!accessibilityOverlay()&&!Settings.canDrawOverlays(this)){
             running=false;statusHint="悬浮窗权限已关闭，请重新授权";stopSelf();return START_NOT_STICKY;
         }
         prefs.set("overlay_enabled",true);running=true;
@@ -147,7 +158,7 @@ public final class OverlayService extends Service {
         return START_STICKY;
     }
     private final OverlayRecovery.Host recoveryHost=new OverlayRecovery.Host(){
-        public boolean permitted(){return Settings.canDrawOverlays(OverlayService.this);}
+        public boolean permitted(){return accessibilityOverlay()||Settings.canDrawOverlays(OverlayService.this);}
         public boolean unlocked(){
             return !screenOff&&((PowerManager)getSystemService(POWER_SERVICE)).isInteractive()
                     &&!((KeyguardManager)getSystemService(KEYGUARD_SERVICE)).isKeyguardLocked();
@@ -157,7 +168,9 @@ public final class OverlayService extends Service {
                     &&(touching||replaying||view.interactionActive());
         }
         public boolean healthy(){
-            return !windowBroken&&added&&handleAdded&&view.isAttachedToWindow()&&handle.isAttachedToWindow()
+            return !windowBroken&&params.type==windowType()
+                    &&(!accessibilityOverlay()||windowWm==TapAccessibilityService.overlayWindowManager())
+                    &&added&&handleAdded&&view.isAttachedToWindow()&&handle.isAttachedToWindow()
                     &&view.getVisibility()==View.VISIBLE&&handle.getVisibility()==View.VISIBLE
                     &&handle.getAlpha()==1f&&handleParams.alpha==1f&&params.alpha==0f
                     &&(handleParams.flags&WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)==0;
@@ -168,6 +181,9 @@ public final class OverlayService extends Service {
         }
         public boolean restore(boolean reattach){return restoreWindows(reattach);}
     };
+    private boolean accessibilityOverlay(){return prefs.get("accessibility_overlay",false);}
+    private int windowType(){return accessibilityOverlay()?WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY:
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;}
     private void scheduleHealth(long delay){
         main.removeCallbacks(healthCheck);
         if(!destroying)main.postDelayed(healthCheck,delay);
@@ -176,6 +192,17 @@ public final class OverlayService extends Service {
         if(destroying||view==null||!running)return;
         if(!prefs.get("overlay_enabled",false)){
             running=false;statusHint="角落手势已关闭";stopSelf();return;
+        }
+        if(positionEditing){
+            resetInteraction();removeWindows();publishHint("正在应用内调整位置与排列");return;
+        }
+        if(accessibilityOverlay()&&TapAccessibilityService.overlayWindowManager()==null){
+            // A disconnected token cannot own windows. Pause instead of silently
+            // falling back to a normal overlay and its system notification.
+            resetInteraction();removeWindows();
+            publishHint("无障碍入口暂停，请开启「角落绽放 · 点击穿透」服务");
+            if(!screenOff&&((PowerManager)getSystemService(POWER_SERVICE)).isInteractive())scheduleHealth(5000);
+            return;
         }
         OverlayRecovery.State state=recovery.check(SystemClock.uptimeMillis(),recoveryHost);
         if(state==OverlayRecovery.State.PERMISSION){
@@ -186,17 +213,20 @@ public final class OverlayService extends Service {
                 state==OverlayRecovery.State.RETRY?"入口异常，正在重试恢复":
                 state==OverlayRecovery.State.FAILED?"入口恢复失败，请点恢复入口重试（"+windowError+"）":
                 state==OverlayRecovery.State.BUSY?"正在处理手势，结束后检查入口状态":
-                "服务运行 · 入口已挂载"+(prefs.get("guide",true)?"":" · 亮条已隐藏");
-        statusHint=hint;
-        if(!hint.equals(notifiedHint)){
-            notifiedHint=hint;
-            ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(7,notification.setContentText(hint).build());
-        }
+                "服务运行 · "+(accessibilityOverlay()?"无障碍入口":"入口")+"已挂载"+(prefs.get("guide",true)?"":" · 亮条已隐藏");
+        publishHint(hint);
         // No wake lock/alarm: checks pause while the display sleeps. Healthy windows
         // are never re-added periodically just to compete with another overlay.
         if(!screenOff&&((PowerManager)getSystemService(POWER_SERVICE)).isInteractive())
             scheduleHealth(state==OverlayRecovery.State.RETRY?1000:
                     state==OverlayRecovery.State.HIDDEN||state==OverlayRecovery.State.BUSY?2000:5000);
+    }
+    private void publishHint(String hint){
+        statusHint=hint;
+        if(!hint.equals(notifiedHint)){
+            notifiedHint=hint;
+            ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(7,notification.setContentText(hint).build());
+        }
     }
     private void resetInteraction(){
         touching=false;
@@ -207,11 +237,18 @@ public final class OverlayService extends Service {
         restoring=true;
         try{
             resetInteraction();
-            if(reattach||windowBroken||!added||!handleAdded||!view.isAttachedToWindow()||!handle.isAttachedToWindow()){
+            WindowManager target=accessibilityOverlay()?TapAccessibilityService.overlayWindowManager():wm;
+            if(target==null)return false;
+            int type=windowType();
+            if(reattach||windowWm!=target||params.type!=type||windowBroken||!added||!handleAdded||!view.isAttachedToWindow()||!handle.isAttachedToWindow()){
                 removeWindows();
+                windowWm=target;
+                // WindowManager fills the default token for this connected service.
+                // Drop tokens written by a previous mode/service connection.
+                params.type=type;handleParams.type=type;params.token=null;handleParams.token=null;
                 // Keep canvas below its input handle; neither window moves on a gesture.
-                wm.addView(view,params);added=true;
-                wm.addView(handle,handleParams);handleAdded=true;
+                windowWm.addView(view,params);added=true;
+                windowWm.addView(handle,handleParams);handleAdded=true;
             }
             measure();
             view.setVisibility(View.VISIBLE);handle.setVisibility(View.VISIBLE);handle.setAlpha(1f);
@@ -223,8 +260,8 @@ public final class OverlayService extends Service {
         }finally{restoring=false;}
     }
     private void removeWindows(){
-        if(handle!=null&&(handleAdded||handle.isAttachedToWindow()))try{wm.removeViewImmediate(handle);}catch(RuntimeException ignored){}
-        if(view!=null&&(added||view.isAttachedToWindow()))try{wm.removeViewImmediate(view);}catch(RuntimeException ignored){}
+        if(handle!=null&&(handleAdded||handle.isAttachedToWindow()))try{windowWm.removeViewImmediate(handle);}catch(RuntimeException ignored){}
+        if(view!=null&&(added||view.isAttachedToWindow()))try{windowWm.removeViewImmediate(view);}catch(RuntimeException ignored){}
         handleAdded=false;added=false;
     }
     private void recordWindowFailure(RuntimeException error){
@@ -303,7 +340,7 @@ public final class OverlayService extends Service {
         // Make the actual WINDOW transparent and non-touchable before injecting.
         // View alpha alone would still leave an obscuring input window on Android 12+.
         handleParams.alpha=0;handleParams.flags|=WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-        try{wm.updateViewLayout(handle,handleParams);}catch(RuntimeException e){cancelTapReplay();return;}
+        try{windowWm.updateViewLayout(handle,handleParams);}catch(RuntimeException e){cancelTapReplay();return;}
         Runnable restore=()->{if(request==replayGeneration)cancelTapReplay();};
         main.postDelayed(()->{
             if(request!=replayGeneration||!replaying)return;
@@ -319,15 +356,15 @@ public final class OverlayService extends Service {
         if(tapClassifier!=null)tapClassifier.cancel();
         if(handleParams==null)return;
         handleParams.alpha=1;handleParams.flags&=~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-        if(handleAdded){try{wm.updateViewLayout(handle,handleParams);}catch(RuntimeException e){recordWindowFailure(e);}}
+        if(handleAdded){try{windowWm.updateViewLayout(handle,handleParams);}catch(RuntimeException e){recordWindowFailure(e);}}
     }
     private void measure(){
         DisplayMetrics metrics=new DisplayMetrics();wm.getDefaultDisplay().getRealMetrics(metrics);
         screenW=metrics.widthPixels;screenH=metrics.heightPixels;
-        float width=dp(prefs.get("width",16)),height=dp(prefs.get("height",88));
-        float right=Math.max(dp(175),screenW-dp(prefs.get("right",0)));
-        float bottom=Math.min(screenH-dp(24),Math.max(dp(300),screenH-dp(prefs.get("bottom",36))));
-        trigger=new RectF(Math.max(0,right-width),Math.max(0,bottom-height),right,bottom);
+        float density=getResources().getDisplayMetrics().density;
+        EntryPlacement p=EntryPlacement.resolve(screenW/density,screenH/density,prefs.get("width",16),prefs.get("height",88),
+                prefs.get("right",0),prefs.get("bottom",36));
+        trigger=new RectF(dp(p.left),dp(p.top),dp(p.right),dp(p.bottom));
         view.overlayBounds(screenW,screenH,trigger);
     }
     // Called only for configuration/preferences. Gesture callbacks NEVER resize or move
@@ -346,8 +383,8 @@ public final class OverlayService extends Service {
             handleParams.width=(int)trigger.width();handleParams.height=(int)trigger.height();
         }
         try{
-            if(added)wm.updateViewLayout(view,params);
-            if(handleAdded)wm.updateViewLayout(handle,handleParams);
+            if(added)windowWm.updateViewLayout(view,params);
+            if(handleAdded)windowWm.updateViewLayout(handle,handleParams);
         }catch(RuntimeException e){recordWindowFailure(e);return false;}
         if(handle!=null){
             handle.invalidate();
@@ -364,7 +401,7 @@ public final class OverlayService extends Service {
         if(expanded)params.flags&=~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
         else params.flags|=WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
         if(handle!=null)handle.setAlpha(expanded?0f:1f);
-        if(added){try{wm.updateViewLayout(view,params);}catch(RuntimeException e){recordWindowFailure(e);}}
+        if(added){try{windowWm.updateViewLayout(view,params);}catch(RuntimeException e){recordWindowFailure(e);}}
     }
     @Override public void onConfigurationChanged(Configuration c){
         super.onConfigurationChanged(c);if(view==null)return;resetInteraction();measure();layoutWindows();
@@ -372,6 +409,7 @@ public final class OverlayService extends Service {
     }
     @Override public void onDestroy(){
         destroying=true;
+        editorChanged=null;
         if(deleteHold!=null)deleteHold.cancel();
         if(running)statusHint="服务已停止，可点恢复入口重新开启";
         running=false;generation++;replayGeneration++;TapAccessibilityService.setStateListener(null);loader.shutdownNow();main.removeCallbacksAndMessages(null);

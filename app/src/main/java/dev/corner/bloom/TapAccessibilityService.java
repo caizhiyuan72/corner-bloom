@@ -10,6 +10,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Display;
+import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityManager;
 
@@ -23,6 +24,12 @@ public final class TapAccessibilityService extends AccessibilityService {
     private boolean ready;
     private String setup="正在恢复轻点服务…";
     static boolean available(){return current!=null&&current.ready;}
+    // This manager carries the connected service's accessibility window token.
+    // Never use an application Context to add TYPE_ACCESSIBILITY_OVERLAY windows.
+    static WindowManager overlayWindowManager(){
+        TapAccessibilityService service=current;
+        return service!=null&&service.ready?(WindowManager)service.getSystemService(WINDOW_SERVICE):null;
+    }
     static String connectionHint(){return current==null?"请在系统无障碍设置中开启「角落绽放 · 点击穿透」。":current.setup;}
     static String lastTapHint(){return lastTap;}
     static String lastDeleteHint(){return lastDelete;}

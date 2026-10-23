@@ -1,4 +1,4 @@
 <resources>
     <string name="tap_accessibility_label">角落绽放 · 点击穿透</string>
-    <string name="tap_accessibility_description">轻点角落入口后在同一位置补一次点击，上滑展开应用。可选长按删除辅助使用 Android 输入编辑接口发送删除键：仅在键盘显示、输入框已连接、手指按在标记的删除键区域时连续删除，松手停止。无需 Root，不启用触摸探索，不读取或保存输入文字。</string>
+    <string name="tap_accessibility_description">轻点角落入口后在同一位置补一次点击，上滑展开应用。可选通过无障碍显示手势入口，无障碍断开时暂停入口。可选长按删除辅助使用 Android 输入编辑接口发送删除键：仅在键盘显示、输入框已连接、手指按在标记的删除键区域时连续删除，松手停止。无需 Root，不启用触摸探索，不读取或保存输入文字。</string>
 </resources>

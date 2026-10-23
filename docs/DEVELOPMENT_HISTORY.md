@@ -1,6 +1,41 @@
-# 角落绽放 · Corner Bloom 0.2.1
+# 角落绽放 · Corner Bloom 0.2.3
 
 给安卓日常单手操作做的角落应用启动器原型。右下角上划展开，保持按住，滑到图标后松手打开。没有长按等待。图标沿不同轨迹散出、旋转、轻微回弹，最终落在固定位置。
+
+## 0.2.3：应用内位置编辑与分组设置页
+
+本版按用户四项要求调整：删除展开时的操作提示，移除首页练习卡，位置/排列改为在应用内部拖动调整，主界面参考 XGesture 的 Miuix 分组设置风格，减少首页拥挤。仅借鉴信息层级与外观思路，未复制其代码或引入 Compose/Miuix 依赖。
+
+- 首页保留主开关、运行状态、恢复入口，以及常用应用、位置与排列、外观与手感、显示与穿透、后台与启动五个分类。详细参数与说明进入独立设置页面，默认浅灰背景、白色分组卡片和蓝色强调，支持系统深色模式。
+- 新增 PositionEditorView，在应用内用真实屏幕比例显示入口与应用扇形布局。拖亮条改入口的右/底边距，拖图标交换固定槽位。使用 EntryPlacement 与 FanGeometry 共用实际悬浮坐标和布局；入口移动仍受已有扇形展开空间与底部系统区域限制。
+- ArrangementDraft 保存临时坐标和顺序；保存时由 Prefs.arrangement 一次写入坐标与应用列表，取消/返回/离开应用不提交。单次手势 CANCEL 或多指会恢复该次拖动前的草稿。重置入口保留图标排列。
+- 编辑期间临时移除真实悬浮窗口并取消旧交互，避免输入冲突；关闭编辑器后只恢复原先运行的服务，不启动已关闭服务。设置页不再创建旧的练习 BloomView。
+- 长按删除的测试输入框保留在「显示与穿透」中，保持原补点、长按删除和无障碍入口功能。展开时仍显示所选应用名，但不再显示通用操作提示。
+- versionCode 14 / 0.2.3，沿用发布签名。
+
+验证：API 35 编译、DEX、对齐和签名一致性；草稿测试覆盖真实像素映射、不同密度、越界、排列无重复丢失、位置重置与旋转。生产 PositionEditorView 的主机输入替身覆盖缩放后拖动、图标换位、CANCEL/多指回退；实际绘图调用导出 SVG 供内部布局检查（示例图标为替身）。生产 OverlayService 生命周期检查增加编辑暂停、恢复请求不打断编辑、退出恢复及保存坐标一致性。原有布局、补点、长按和无障碍服务检查继续执行。替身与 SVG 均不代替 Android 真机界面、中文字体布局和触摸测试；未完成目标设备运行验证。
+
+参考项目：https://github.com/qpst4/XGesture
+
+## 0.2.2：可选无障碍手势入口
+
+用户截图确认：一加系统中的普通悬浮窗提醒类别开关为灰色，不能从通知设置关闭。本版不修改系统通知配置，新增默认关闭的「通过无障碍显示入口」，让用户选择以已开启的无障碍服务显示手势入口。
+
+- 两个常驻窗口使用 TYPE_ACCESSIBILITY_OVERLAY，由 TapAccessibilityService 返回的 WindowManager 添加；该 manager 带有已连接服务的默认 token，不能用应用 Context 的 manager 代替。服务未连接或普通触摸模式未就绪时不返回 manager。
+- 切换模式前通过旧 manager 移除窗口，再替换类型并清除旧 token，让目标 manager 注入当前连接 token。无障碍重连（包括同一个 manager 更新 token）时重新挂载；普通模式使用原 manager 和 TYPE_APPLICATION_OVERLAY。
+- 无障碍断开时取消正在进行的手势、补点和删除，移除窗口并显示暂停状态；连接恢复后继续。不会无提示地回退为普通窗口。
+- 无障碍模式的启动、开机等待和删除键标记不再要求普通悬浮窗权限；标记层也使用无障碍 manager 和窗口类型。正常模式仍检查原悬浮窗权限。
+- 未新增窗口内容读取、触摸探索、通知访问或网络能力。前台服务的运行通知仍保留停止/恢复操作；无障碍功能仍需用户在系统中手动开启。
+- versionCode 13 / 0.2.2，沿用已发布签名。
+
+实现依据：Android 15 AOSP Session.onWindowSurfaceVisibilityChanged 仅对 isSystemAlertWindowType 窗口处理 AlertWindowNotification；无障碍窗口类型不在该集合中。AccessibilityService.getSystemService(WINDOW_SERVICE) 为 manager 设置服务连接的默认 token。因一加厂商修改未知，不能把该依据当成此设备上通知已消失的实测结果。
+
+验证：API 35 编译、DEX、对齐、v2/v3 签名和与上一版的证书一致性检查；生产 OverlayService 的主机端替身测试增加无障碍窗口类型/manager/token、断开不回退、新实例重连、同实例 token 更新、补点、锁屏和切回普通模式。生产 TapAccessibilityService 的检查确认 manager 只在连接就绪时返回、解绑清空、重连替换，且事件类型/触摸探索保持关闭。保留原长按删除及补点协议检查。尚未进行 Android 设备运行测试，键盘层级、实际手势及一加通知行为需用户验证。
+
+实现依据：
+- https://developer.android.com/reference/android/view/WindowManager.LayoutParams#TYPE_ACCESSIBILITY_OVERLAY
+- https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android15-release/services/core/java/com/android/server/wm/Session.java
+- https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/accessibilityservice/AccessibilityService.java
 
 ## 0.2.1：修复入口隐藏后的恢复与运行状态
 

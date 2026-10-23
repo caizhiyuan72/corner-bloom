@@ -32,4 +32,7 @@ final class Prefs {
     }
     boolean hasSelection(){return sp.contains("apps");}
     void selected(List<String> ids){sp.edit().putString("apps",String.join("|",ids)).apply();}
+    void arrangement(int right,int bottom,List<String> ids){
+        sp.edit().putInt("right",right).putInt("bottom",bottom).putString("apps",String.join("|",ids)).apply();
+    }
 }

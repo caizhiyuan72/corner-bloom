@@ -124,14 +124,15 @@ package android.view;public class MotionEvent {
 "android/view/WindowManager.java": """
 package android.view;import java.util.*;public class WindowManager {
  public final List<View> attached=new ArrayList<>();public int adds,removes,updates,failAdds,failUpdates,failOnAdd;
+ public Object token=new Object();
  public Display getDefaultDisplay(){return new Display();}public WindowMetrics getCurrentWindowMetrics(){return new WindowMetrics();}
- public void addView(View v,LayoutParams p){adds++;if(failAdds-->0||adds==failOnAdd)throw new IllegalStateException("add failed");if(v.attached)throw new IllegalStateException("duplicate");attached.add(v);v.attached=true;}
+ public void addView(View v,LayoutParams p){adds++;if(failAdds-->0||adds==failOnAdd)throw new IllegalStateException("add failed");if(v.attached)throw new IllegalStateException("duplicate");if(p.token==null)p.token=token;if(p.token!=token)throw new IllegalStateException("stale connection token");attached.add(v);v.attached=true;}
  public void removeViewImmediate(View v){removes++;attached.remove(v);v.attached=false;}
  public void updateViewLayout(View v,LayoutParams p){updates++;if(failUpdates-->0||!v.attached)throw new IllegalArgumentException("lost root");}
  public static class LayoutParams {
-  public static final int TYPE_APPLICATION_OVERLAY=2038,FLAG_NOT_FOCUSABLE=1,FLAG_NOT_TOUCHABLE=2,FLAG_ALT_FOCUSABLE_IM=4,FLAG_NOT_TOUCH_MODAL=8,FLAG_LAYOUT_IN_SCREEN=16,SOFT_INPUT_ADJUST_NOTHING=32,LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES=1;
-  public int flags,x,y,width,height,gravity,windowAnimations,softInputMode,layoutInDisplayCutoutMode;public float alpha=1;
-  public LayoutParams(int w,int h,int t,int f,int p){width=w;height=h;flags=f;}
+  public static final int TYPE_APPLICATION_OVERLAY=2038,TYPE_ACCESSIBILITY_OVERLAY=2032,FLAG_NOT_FOCUSABLE=1,FLAG_NOT_TOUCHABLE=2,FLAG_ALT_FOCUSABLE_IM=4,FLAG_NOT_TOUCH_MODAL=8,FLAG_LAYOUT_IN_SCREEN=16,SOFT_INPUT_ADJUST_NOTHING=32,LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES=1;
+  public int type,flags,x,y,width,height,gravity,windowAnimations,softInputMode,layoutInDisplayCutoutMode;public float alpha=1;public Object token;
+  public LayoutParams(int w,int h,int t,int f,int p){width=w;height=h;type=t;flags=f;}
   public void setTitle(String s){}public void setFitInsetsTypes(int t){}
  }
 }
@@ -159,8 +160,10 @@ final class BloomView extends View {
 """,
 "dev/corner/bloom/CornerHandleView.java": "package dev.corner.bloom;import android.content.*;import android.view.*;final class CornerHandleView extends View {CornerHandleView(Context c,Prefs p){super(c);}}",
 "dev/corner/bloom/TapAccessibilityService.java": """
-package dev.corner.bloom;import android.os.*;final class TapAccessibilityService {
- static boolean available(){return true;}static void setStateListener(Runnable r){}static DeleteHold.Source captureDelete(){return null;}
+package dev.corner.bloom;import android.os.*;import android.view.*;final class TapAccessibilityService {
+ static boolean connected=true;static WindowManager windows=new WindowManager();static Runnable listener;
+ static boolean available(){return connected;}static WindowManager overlayWindowManager(){return connected?windows:null;}
+ static void setStateListener(Runnable r){listener=r;}static DeleteHold.Source captureDelete(){return null;}
  static void deleteStatus(String s){}static boolean tap(float x,float y,Runnable done){new Handler(Looper.getMainLooper()).postDelayed(done,24);return true;}
 }
 """,
@@ -232,7 +235,44 @@ public final class OverlayServiceProtocolTest {
   failed.windows.failAdds=0;failed.onStartCommand(new Intent().setAction(OverlayService.RESTORE),0,9);
   check(failed.windows.attached.size()==2,"manual action can retry after bounded failure");
   Settings.allowed=false;checkNow(failed);check(failed.stopped&&!OverlayService.running&&failed.windows.attached.isEmpty(),"permission revocation stops service and removes windows immediately");failed.onDestroy();Settings.allowed=true;
+  // Opt-in accessibility windows must use the connected service's manager/token.
+  Prefs.data.clear();Prefs.data.put("accessibility_overlay",true);Settings.allowed=false;
+  OverlayService accessible=start();WindowManager a11y=TapAccessibilityService.windows;
+  check(!accessible.stopped&&accessible.windows.adds==0&&a11y.attached.size()==2,"accessibility mode needs no normal overlay permission and adds no normal windows");
+  hp=(WindowManager.LayoutParams)field(accessible,"handleParams");
+  check(hp.type==WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY&&hp.token==a11y.token,"accessibility window uses correct type and connected token");
+  touch(accessible,MotionEvent.ACTION_DOWN,1000);touch(accessible,MotionEvent.ACTION_UP,1050);Handler.advance(1000);
+  check(hp.alpha==1&&(hp.flags&WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)==0,"tap replay stays functional on accessibility manager");
+  TapAccessibilityService.connected=false;TapAccessibilityService.listener.run();Handler.advance(0);
+  check(a11y.attached.isEmpty()&&accessible.windows.adds==0&&OverlayService.statusHint.contains("暂停"),"disconnection removes windows without normal-overlay fallback");
+  TapAccessibilityService.windows=new WindowManager();TapAccessibilityService.connected=true;TapAccessibilityService.listener.run();Handler.advance(0);
+  check(TapAccessibilityService.windows.attached.size()==2&&hp.token==TapAccessibilityService.windows.token,"reconnection replaces old token and recovers");
+  // The framework may reconnect the same service/manager with a new token.
+  TapAccessibilityService.windows.token=new Object();TapAccessibilityService.listener.run();Handler.advance(0);
+  check(TapAccessibilityService.windows.attached.size()==2&&hp.token==TapAccessibilityService.windows.token,"same manager with renewed service token is reattached");
+  accessible.power.interactive=false;screen(accessible,Intent.ACTION_SCREEN_OFF);
+  check(((View)field(accessible,"handle")).getVisibility()==View.GONE,"accessibility mode also hides on lockscreen");
+  accessible.power.interactive=true;accessible.keyguard.locked=false;screen(accessible,Intent.ACTION_SCREEN_ON);
+  check(((View)field(accessible,"handle")).getVisibility()==View.VISIBLE,"accessibility mode restores after unlock");
+  Settings.allowed=true;Prefs.data.put("accessibility_overlay",false);accessible.onStartCommand(new Intent().setAction(OverlayService.RESTORE),0,10);
+  check(TapAccessibilityService.windows.attached.isEmpty()&&accessible.windows.attached.size()==2&&hp.type==WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY&&hp.token==accessible.windows.token,"switch back removes accessibility windows and uses normal manager/token");
+  accessible.onDestroy();
+  Prefs.data.clear();OverlayService editing=start();
+  OverlayService.positionEditorVisible(true);Handler.advance(0);
+  check(editing.windows.attached.isEmpty()&&OverlayService.statusHint.contains("应用内"),"editor temporarily removes real windows");
+  editing.onStartCommand(new Intent().setAction(OverlayService.RESTORE),0,11);
+  check(editing.windows.attached.isEmpty(),"manual restore cannot interrupt in-app editing");
+  Prefs.data.put("right",70);Prefs.data.put("bottom",125);
+  OverlayService.positionEditorVisible(false);Handler.advance(0);
+  check(editing.windows.attached.size()==2,"leaving editor restores original running service");
+  WindowManager.LayoutParams placed=(WindowManager.LayoutParams)field(editing,"handleParams");
+  check(placed.x==994&&placed.y==2187,"saved editor position uses the same real screen coordinates");
+  editing.onDestroy();
+  TapAccessibilityService.connected=false;Prefs.data.put("accessibility_overlay",true);Settings.allowed=false;
+  OverlayService waiting=start();check(waiting.windows.adds==0&&!waiting.stopped&&OverlayService.statusHint.contains("暂停"),"startup waits for accessibility without adding a normal window");
+  waiting.onDestroy();TapAccessibilityService.connected=true;Settings.allowed=true;Prefs.data.clear();
   System.out.println("Production OverlayService: delayed unlock, lost root, deferred repair, tap replay, failed relayout, sticky restart, explicit stop, partial attachment, retry limits and revoked permission passed (host fixtures).");
+  System.out.println("Accessibility overlay: opt-in window type, manager/token, replay, disconnect without fallback, new/same-manager reconnect, lockscreen, normal mode switch and startup waiting passed (host fixtures).");
  }
 }
 """,
@@ -243,7 +283,7 @@ for name, source in sources.items():
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source)
     paths.append(str(path))
-for name in ["OverlayService.java", "OverlayRecovery.java", "DeleteHold.java", "TapClassifier.java"]:
+for name in ["OverlayService.java", "OverlayRecovery.java", "DeleteHold.java", "TapClassifier.java", "EntryPlacement.java", "FanGeometry.java"]:
     paths.append(str(project / "app/src/main/java/dev/corner/bloom" / name))
 compiler = (["java", "-jar", os.environ["BLOOM_ECJ_JAR"], "-17"] if os.environ.get("BLOOM_ECJ_JAR")
             else ["java", "com.sun.tools.javac.Main"])

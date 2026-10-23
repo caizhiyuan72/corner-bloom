@@ -11,7 +11,7 @@ public final class BootReceiver extends BroadcastReceiver {
         if(!Intent.ACTION_BOOT_COMPLETED.equals(action))return;
         Prefs prefs=new Prefs(context);
         if(!prefs.get("start_on_boot",false))return;
-        boolean allowed=Settings.canDrawOverlays(context);
+        boolean allowed=prefs.get("accessibility_overlay",false)||Settings.canDrawOverlays(context);
         if(!StartupPolicy.shouldStart(action,true,allowed)){prefs.set("boot_failed",true);return;}
         try{context.startForegroundService(new Intent(context,OverlayService.class));}
         catch(RuntimeException e){
