@@ -82,11 +82,11 @@ public final class PositionEditorProtocolTest {
  static void touch(PositionEditorView v,int action,float x,float y)throws Exception{
   RectF s=(RectF)field(v,"screen");float scale=(float)field(v,"scale");v.onTouchEvent(new MotionEvent(action,s.left+x*scale,s.top+y*scale));}
  public static void main(String[] args)throws Exception{
-  for(float density:new float[]{1,2.625f,3})for(int count:new int[]{1,9,15}){
+  for(float density:new float[]{1,2.625f,3})for(int count:new int[]{1,9,15})for(int style=0;style<=2;style++)for(int percent:new int[]{60,100,140}){
    Context context=new Context();context.density=density;
    ArrangementDraft d=new ArrangementDraft(411,914,16,88,0,36,count);
    List<AppEntry> apps=new ArrayList<>();for(int i=0;i<count;i++)apps.add(new AppEntry(i));
-   int[] changed={0};PositionEditorView v=new PositionEditorView(context,d,apps,1,()->changed[0]++);v.size((int)(411*density),(int)(650*density));
+   int[] changed={0};PositionEditorView v=new PositionEditorView(context,d,apps,1,percent,style,()->changed[0]++);v.size((int)(411*density),(int)(650*density));
    EntryPlacement b=d.bounds();float hx=b.right-8,hy=(b.top+b.bottom)/2;
    touch(v,0,hx,hy);touch(v,2,hx-40,hy-90);touch(v,1,hx-40,hy-90);
    check(d.right==40&&d.bottom==126,"physical preview drag updates handle draft correctly at every density");
@@ -121,10 +121,10 @@ public final class PositionEditorProtocolTest {
    check(changed[0]>0,"editor publishes draft changes to its position caption");
    if(density==1&&count==15){
     v.resetPosition();Canvas canvas=new Canvas();v.onDraw(canvas);
-    Files.writeString(Path.of(args[0]),"<svg xmlns='http://www.w3.org/2000/svg' width='411' height='650'><rect width='411' height='650' fill='#f5f5f5'/>"+canvas.svg+"</svg>");
+    Files.writeString(Path.of(args[0].replace("editor.svg","editor-"+style+"-"+percent+".svg")),"<svg xmlns='http://www.w3.org/2000/svg' width='411' height='650'><rect width='411' height='650' fill='#f5f5f5'/>"+canvas.svg+"</svg>");
    }
   }
-  System.out.println("Production position editor: drag, density, exchange/settle, animation-off, CANCEL/multitouch rollback and detach cleanup passed (host fixtures).");
+  System.out.println("Production position editor: 3 layouts x 3 sizes x 3 densities x 3 app counts; drag, exchange, cancellation, animation-off and detach passed (host fixtures).");
  }
 }
 '''
@@ -132,7 +132,7 @@ public final class PositionEditorProtocolTest {
 paths=[]
 for name,source in sources.items():
     path=work/"src"/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(source);paths.append(str(path))
-for name in ["PositionEditorView.java","EditorMotion.java","ArrangementDraft.java","EntryPlacement.java","FanGeometry.java"]:
+for name in ["PositionEditorView.java","EditorMotion.java","ArrangementDraft.java","EntryPlacement.java","FanGeometry.java","LauncherGeometry.java"]:
     paths.append(str(project/"app/src/main/java/dev/corner/bloom"/name))
 subprocess.run(["java","com.sun.tools.javac.Main","-d",str(work/"classes"),*paths],check=True)
 subprocess.run(["java","-cp",str(work/"classes"),"dev.corner.bloom.PositionEditorProtocolTest",str(work/"editor.svg")],check=True)

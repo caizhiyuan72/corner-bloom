@@ -10,6 +10,9 @@ public final class FanGeometry {
     }
     public static float clamp(float n, float lo, float hi) { return Math.max(lo,Math.min(hi,n)); }
     public static Point[] layout(int count, float width, float height, float ox, float oy, float requestedScale) {
+        return layout(count,width,height,ox,oy,requestedScale,false);
+    }
+    static Point[] layout(int count,float width,float height,float ox,float oy,float requestedScale,boolean ordered){
         count=Math.max(0,Math.min(15,count));
         Point[] out=new Point[count];
         if(count==0) return out;
@@ -25,15 +28,15 @@ public final class FanGeometry {
             int n=counts[ring];
             for(int j=0;j<n;j++) {
                 float angle=n==1?47f:12f+(74f*j/(n-1));
-                angle+=ring==1?-2f:ring==2?1f:0f;
+                if(!ordered)angle+=ring==1?-2f:ring==2?1f:0f;
                 float radius=(132f+70f*ring)*scale;
                 // Fixed offsets feel scattered without reshuffling between invocations.
-                float jitter=((index*17)%9-4)*1.1f;
+                float jitter=ordered?0:((index*17)%9-4)*1.1f;
                 double rad=Math.toRadians(angle);
                 float x=ox-(float)Math.cos(rad)*(radius+jitter);
                 float y=oy-(float)Math.sin(rad)*(radius+jitter);
                 out[index]=new Point(clamp(x,28,width-28),clamp(y,28,height-28),
-                        ((index*19)%23-11)*.47f,ring*.045f+j*.012f);
+                        ordered?0:((index*19)%23-11)*.47f,ordered?0:ring*.045f+j*.012f);
                 index++;
             }
         }

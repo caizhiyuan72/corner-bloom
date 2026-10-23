@@ -3,7 +3,6 @@ package dev.corner.bloom;
 import android.content.*;
 import android.content.pm.*;
 import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import java.util.*;
 
@@ -25,8 +24,7 @@ final class AppEntry {
             if(!seen.add(component.flattenToString()))continue;
             try{
                 Drawable d=r.loadIcon(pm);
-                Bitmap b=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888);
-                d.setBounds(0,0,size,size);d.draw(new Canvas(b));
+                Bitmap b=RoundedIcons.create(d,size);
                 out.add(new AppEntry(component,r.loadLabel(pm).toString(),b));
             }catch(RuntimeException ignored){}
         }

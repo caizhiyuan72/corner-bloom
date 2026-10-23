@@ -14,6 +14,7 @@ final class PositionEditorView extends View {
     private final List<AppEntry> apps;
     private final Listener listener;
     private final float spread,density;
+    private final int layoutStyle,iconScale;
     private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
     private final RectF screen=new RectF(),iconBounds=new RectF();
     private final EditorMotion motion;
@@ -25,7 +26,11 @@ final class PositionEditorView extends View {
     private int[] gestureOrder;
     private int gestureRight,gestureBottom;
     PositionEditorView(Context context,ArrangementDraft draft,List<AppEntry> apps,float spread,Listener listener){
+        this(context,draft,apps,spread,100,LauncherGeometry.GRID,listener);
+    }
+    PositionEditorView(Context context,ArrangementDraft draft,List<AppEntry> apps,float spread,int iconScale,int layoutStyle,Listener listener){
         super(context);this.draft=draft;this.apps=new ArrayList<>(apps);this.spread=spread;this.listener=listener;
+        this.iconScale=iconScale;this.layoutStyle=layoutStyle;
         motion=new EditorMotion(apps.size());settle.setDuration(180);settle.setInterpolator(new LinearInterpolator());
         settle.addUpdateListener(animation->{motion.advance(animation.getAnimatedFraction());invalidate();});
         density=getResources().getDisplayMetrics().density;
@@ -41,11 +46,8 @@ final class PositionEditorView extends View {
     private void recalculate(){
         settle.cancel();
         EntryPlacement b=draft.bounds();
-        points=FanGeometry.layout(apps.size(),draft.screenW,draft.screenH,b.right-8,b.bottom-8,spread);
-        float closest=1000;
-        for(int i=0;i<points.length;i++)for(int j=0;j<i;j++)
-            closest=Math.min(closest,(float)Math.hypot(points[i].x-points[j].x,points[i].y-points[j].y));
-        iconSize=Math.max(25,Math.min(47,closest*.83f));motion.snap(draft.order,points);invalidate();
+        LauncherGeometry.Layout layout=LauncherGeometry.layout(apps.size(),draft.screenW,draft.screenH,b.right-8,b.bottom-8,spread,iconScale,layoutStyle);
+        points=layout.points;iconSize=layout.iconSize;motion.snap(draft.order,points);invalidate();
     }
     private void animateArrangement(){
         settle.cancel();
@@ -87,7 +89,9 @@ final class PositionEditorView extends View {
             EntryPlacement b=draft.bounds();float reach=dp(22)/scale;
             boolean onHandle=Math.abs(x-(b.right-8))<=Math.max(b.width()/2,reach)
                     &&y>=b.top-reach*.35f&&y<=b.bottom+reach*.35f;
-            drag=onHandle?-2:pickedIconAt(x,y);
+            int picked=pickedIconAt(x,y);
+            boolean insideHandle=x>=b.left&&x<=b.right&&y>=b.top&&y<=b.bottom;
+            drag=insideHandle?-2:picked>=0?picked:onHandle?-2:-1;
             if(drag==-1)return true;
             pointer=event.getPointerId(0);downX=fingerX=x;downY=fingerY=y;
             movedIcon=false;
@@ -160,8 +164,8 @@ final class PositionEditorView extends View {
         paint.setColor(Color.WHITE);paint.setAlpha(255);
         iconBounds.set(x-size/2,y-size/2,x+size/2,y+size/2);
         canvas.drawBitmap(apps.get(draft.order[slot]).icon,null,iconBounds,paint);
-        paint.setTextAlign(Paint.Align.CENTER);paint.setTextSize(12);
-        paint.setColor(0xffc9c5da);canvas.drawText(String.valueOf(slot+1),x,y+size/2+14,paint);
+        paint.setTextAlign(Paint.Align.CENTER);paint.setTextSize(Math.min(12,size*.22f));
+        paint.setColor(0xffc9c5da);canvas.drawText(String.valueOf(slot+1),x,y+size*.77f,paint);
     }
     @Override protected void onDetachedFromWindow(){settle.cancel();super.onDetachedFromWindow();}
 }

@@ -110,7 +110,7 @@ public final class MainActivity extends Activity {
         divider(services);
         navigationRow(services,"后台与启动","开机启动与最近任务",this::showBackgroundSettings);
         gap(content,5);
-        TextView version=text("角落绽放  0.2.5",12,MUTED);version.setGravity(Gravity.CENTER);
+        TextView version=text("角落绽放  1.0.0",12,MUTED);version.setGravity(Gravity.CENTER);
         content.addView(version);
         pages=new PageHost(this,BG);applyInsets(pages);pages.setRoot(scroll);setContentView(pages);
     }
@@ -164,9 +164,35 @@ public final class MainActivity extends Activity {
     }
     private void showAppearanceSettings(){
         LinearLayout body=openSettingsPage("外观与手感");
+        section(body,"图标与布局");LinearLayout layout=card(body);
+        RadioGroup styles=new RadioGroup(this);styles.setOrientation(RadioGroup.VERTICAL);
+        String[] names={"整齐网格","规整扇形","经典散开"};
+        for(int i=0;i<names.length;i++){
+            RadioButton option=new RadioButton(this);option.setId(700+i);option.setText(names[i]);option.setTextColor(INK);option.setTextSize(14);
+            styles.addView(option,new RadioGroup.LayoutParams(-1,dp(44)));
+        }
+        styles.check(700+LauncherGeometry.style(prefs.get("layout_style",LauncherGeometry.GRID)));
+        styles.setOnCheckedChangeListener((group,id)->prefs.set("layout_style",LauncherGeometry.style(id-700)));
+        layout.addView(styles);gap(layout,8);
+        layout.addView(text("网格和规整扇形保持图标正向，经典散开保留旋转效果。",12,MUTED));gap(layout,10);
+        LinearLayout samples=new LinearLayout(this);samples.setGravity(Gravity.CENTER);layout.addView(samples,new LinearLayout.LayoutParams(-1,dp(78)));
+        List<ImageView> icons=new ArrayList<>();List<AppEntry> favorites=ready?AppEntry.favorites(all,prefs):Collections.emptyList();
+        int sampleCount=getResources().getDisplayMetrics().widthPixels/getResources().getDisplayMetrics().density>=360?3:2;
+        if(favorites.isEmpty())samples.setVisibility(View.GONE);
+        for(int i=0;i<Math.min(sampleCount,favorites.size());i++){
+            ImageView icon=new ImageView(this);icon.setImageBitmap(favorites.get(i).icon);icon.setContentDescription(favorites.get(i).name);
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(47),dp(47));lp.setMargins(dp(8),0,dp(8),0);samples.addView(icon,lp);icons.add(icon);
+        }
+        slider(layout,"图标大小","icon_scale",60,140,100,"%",percent->{
+            int size=dp(47*percent/100f);
+            for(ImageView icon:icons){android.view.ViewGroup.LayoutParams lp=icon.getLayoutParams();if(lp.width!=size){lp.width=lp.height=size;icon.setLayoutParams(lp);}}
+        });
+        layout.addView(text("展开范围不会改变图标大小；间距过小或超出屏幕时会限制范围。",12,MUTED));gap(layout,8);
+        Button preview=button("预览与调整排列",false);layout.addView(preview,new LinearLayout.LayoutParams(-1,dp(48)));
+        preview.setOnClickListener(v->showPositionEditor());
         section(body,"展开动画");LinearLayout motion=card(body);
-        slider(motion,"展开范围","spread",80,115,100,"%");
-        slider(motion,"旋转与回弹","motion",0,150,100,"%");
+        slider(motion,"展开范围与间距","spread",80,115,100,"%");
+        slider(motion,"经典样式旋转与回弹","motion",0,150,100,"%");
         toggle(motion,"滑过图标时轻震","haptic",true);
         section(body,"背景");LinearLayout fog=card(body);
         slider(fog,"雾效强度 · 0% 关闭","fog_strength",0,50,22,"%");
@@ -254,7 +280,8 @@ public final class MainActivity extends Activity {
         heading.addView(text("拖动亮条移动入口，拖动图标交换位置",13,MUTED));root.addView(heading);
         TextView detail=text("",12,MUTED);detail.setGravity(Gravity.CENTER);detail.setPadding(dp(8),dp(5),dp(8),dp(8));
         Runnable update=()->updateText(detail,"距右边 "+draft.right+" dp   ·   距底部 "+draft.bottom+" dp");
-        PositionEditorView editor=new PositionEditorView(this,draft,favorites,prefs.get("spread",100)/100f,update::run);
+        PositionEditorView editor=new PositionEditorView(this,draft,favorites,prefs.get("spread",100)/100f,
+                prefs.get("icon_scale",100),prefs.get("layout_style",LauncherGeometry.GRID),update::run);
         root.addView(editor,new LinearLayout.LayoutParams(-1,0,1));root.addView(detail);
         LinearLayout actions=new LinearLayout(this);actions.setPadding(dp(18),dp(4),dp(18),dp(14));
         Button cancel=button("取消",false),reset=button("重置入口",false),save=button("保存",true);
@@ -277,11 +304,16 @@ public final class MainActivity extends Activity {
         }catch(RuntimeException e){positionPage=null;OverlayService.positionEditorVisible(false);throw e;}
     }
     private void slider(LinearLayout parent,String label,String key,int min,int max,int fallback,String unit){
-        TextView value=text(label+"  "+prefs.get(key,fallback)+" "+unit,13,INK);parent.addView(value);
-        SeekBar bar=new SeekBar(this);bar.setMax(max-min);bar.setProgress(prefs.get(key,fallback)-min);
+        slider(parent,label,key,min,max,fallback,unit,null);
+    }
+    private void slider(LinearLayout parent,String label,String key,int min,int max,int fallback,String unit,java.util.function.IntConsumer changed){
+        int initial=Math.max(min,Math.min(max,prefs.get(key,fallback)));
+        TextView value=text(label+"  "+initial+" "+unit,13,INK);parent.addView(value);
+        SeekBar bar=new SeekBar(this);bar.setMax(max-min);bar.setProgress(initial-min);
         parent.addView(bar,new LinearLayout.LayoutParams(-1,dp(40)));
+        if(changed!=null)changed.accept(initial);
         bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-            public void onProgressChanged(SeekBar s,int n,boolean from){updateText(value,label+"  "+(n+min)+" "+unit);}
+            public void onProgressChanged(SeekBar s,int n,boolean from){updateText(value,label+"  "+(n+min)+" "+unit);if(changed!=null)changed.accept(n+min);}
             public void onStartTrackingTouch(SeekBar s){}
             public void onStopTrackingTouch(SeekBar s){prefs.set(key,s.getProgress()+min);}
         });

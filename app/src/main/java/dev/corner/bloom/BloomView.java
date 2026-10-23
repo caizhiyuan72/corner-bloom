@@ -22,6 +22,7 @@ final class BloomView extends View implements Choreographer.FrameCallback {
     private float fullWidth,fullHeight,originX,originY,downX,downY,fingerX,fingerY;
     private float progress,velocity,target;
     private float iconDp=47,hitDp=32;
+    private int layoutStyle=LauncherGeometry.GRID;
     private boolean tracking,activated,scheduled,closing;
     private int pointerId=-1,selected=-1;
     private long previousFrame;
@@ -64,12 +65,10 @@ final class BloomView extends View implements Choreographer.FrameCallback {
         fogShader=null;
         if(fullWidth==0||fullHeight==0)return;
         originX=trigger.right-dp(8);originY=trigger.bottom-dp(8);
-        points=FanGeometry.layout(apps.size(),fullWidth/density,fullHeight/density,
-                originX/density,originY/density,prefs.get("spread",100)/100f);
-        float closest=1000;
-        for(int i=0;i<points.length;i++)for(int j=0;j<i;j++)
-            closest=Math.min(closest,(float)Math.hypot(points[i].x-points[j].x,points[i].y-points[j].y));
-        iconDp=Math.max(25,Math.min(47,closest*.83f));hitDp=Math.min(32,closest*.52f);
+        layoutStyle=LauncherGeometry.style(prefs.get("layout_style",LauncherGeometry.GRID));
+        LauncherGeometry.Layout layout=LauncherGeometry.layout(apps.size(),fullWidth/density,fullHeight/density,
+                originX/density,originY/density,prefs.get("spread",100)/100f,prefs.get("icon_scale",100),layoutStyle);
+        points=layout.points;iconDp=layout.iconSize;hitDp=layout.hitRadius;
     }
     private void kick(){if(!scheduled&&isAttachedToWindow()){scheduled=true;Choreographer.getInstance().postFrameCallback(this);}}
     @Override public void doFrame(long now){
@@ -78,6 +77,7 @@ final class BloomView extends View implements Choreographer.FrameCallback {
         float strength=prefs.get("motion",100)/100f;
         float damping=strength<.05?30f:23f-4f*Math.min(strength,1.5f);
         if(closing){progress=OverlayMotion.close(progress,dt);velocity=0;}
+        else if(layoutStyle!=LauncherGeometry.CLASSIC){progress+=(target-progress)*(1-(float)Math.exp(-20*dt));velocity=0;}
         else{velocity+=(250f*(target-progress)-damping*velocity)*dt;progress+=velocity*dt;}
         progress=Math.max(0,Math.min(1.17f,progress));
         boolean moving=Math.abs(target-progress)>.0015f||Math.abs(velocity)>.012f;
@@ -96,7 +96,7 @@ final class BloomView extends View implements Choreographer.FrameCallback {
         if(moving)kick();else previousFrame=0;
     }
     private void updatePositions(){
-        float strength=prefs.get("motion",100)/100f;
+        float strength=layoutStyle==LauncherGeometry.CLASSIC?prefs.get("motion",100)/100f:0;
         for(int i=0;i<points.length;i++){
             FanGeometry.Point p=points[i];
             float t=FanGeometry.clamp((progress-p.delay)/(1-p.delay),0,1.14f);
@@ -166,7 +166,7 @@ final class BloomView extends View implements Choreographer.FrameCallback {
         if(visible>.002f){
             drawFog(canvas,visible);
             updatePositions();
-            float strength=prefs.get("motion",100)/100f;
+            float strength=layoutStyle==LauncherGeometry.CLASSIC?prefs.get("motion",100)/100f:0;
             for(int i=0;i<apps.size();i++)if(i!=selected)drawIcon(canvas,i,strength);
             if(selected>=0)drawIcon(canvas,selected,strength);
             paint.setColor(Color.argb((int)(165*visible),216,209,246));
