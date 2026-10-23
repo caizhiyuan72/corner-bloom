@@ -1,0 +1,16 @@
+.gradle/
+**/build/
+local.properties
+.local-signing/
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+.env
+.env.*
+.idea/
+*.iml
+__pycache__/
+*.pyc
+.DS_Store
