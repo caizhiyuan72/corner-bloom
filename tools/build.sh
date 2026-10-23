@@ -9,6 +9,7 @@ if [[ ! -f "$platform_jar" || ! -x "$build_tools/aapt2" ]]; then
   exit 1
 fi
 build_dir="$project_dir/app/build/manual"
+version_name="$(python3 -c 'import sys,xml.etree.ElementTree as E; print(E.parse(sys.argv[1]).getroot().attrib["{http://schemas.android.com/apk/res/android}versionName"])' "$project_dir/app/src/main/AndroidManifest.xml")"
 mkdir -p "$build_dir/classes" "$build_dir/generated" "$build_dir/dex"
 find "$build_dir/classes" -name '*.class' -delete
 "$build_tools/aapt2" compile --dir "$project_dir/app/src/main/res" -o "$build_dir/resources.zip"
@@ -35,6 +36,6 @@ if [[ ! -f "$key_path" ]]; then
     -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=Corner Bloom Local Development'
 fi
 "$build_tools/apksigner" sign --ks "$key_path" --ks-pass pass:android --ks-key-alias bloom \
-  --out "$build_dir/corner-bloom-0.2.0.apk" "$build_dir/aligned.apk"
-"$build_tools/apksigner" verify --verbose "$build_dir/corner-bloom-0.2.0.apk"
-echo "$build_dir/corner-bloom-0.2.0.apk"
+  --out "$build_dir/corner-bloom-$version_name.apk" "$build_dir/aligned.apk"
+"$build_tools/apksigner" verify --verbose "$build_dir/corner-bloom-$version_name.apk"
+echo "$build_dir/corner-bloom-$version_name.apk"

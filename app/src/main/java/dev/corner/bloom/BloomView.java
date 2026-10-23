@@ -40,6 +40,7 @@ final class BloomView extends View implements Choreographer.FrameCallback {
     }
     float dp(float n){return n*density;}
     boolean gestureActive(){return activated;}
+    boolean interactionActive(){return tracking||closing||scheduled;}
     void setApps(List<AppEntry> value){apps=new ArrayList<>(value);recalculate();invalidate();}
     void overlayBounds(int w,int h,RectF bounds){fullWidth=w;fullHeight=h;trigger.set(bounds);recalculate();}
     void reset(){
@@ -89,7 +90,7 @@ final class BloomView extends View implements Choreographer.FrameCallback {
         if(tracking&&activated)selectAtFinger();
         invalidate();
         if(closing&&progress<.006f&&Math.abs(velocity)<.1f){
-            closing=false;progress=0;previousFrame=0;host.collapse();return;
+            closing=false;activated=false;progress=0;previousFrame=0;host.collapse();return;
         }
         if(moving)kick();else previousFrame=0;
     }

@@ -30,6 +30,9 @@ public final class MainActivity extends Activity {
     private WindowManager calibrationWm;
     private int calibrationGeneration;
     private boolean foreground;
+    private final Runnable refreshRuntime=new Runnable(){
+        public void run(){if(!foreground)return;refreshStatus();refreshTapHint();ui.postDelayed(this,1000);}
+    };
     int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}
     @Override public void onCreate(Bundle state){
         super.onCreate(state);prefs=new Prefs(this);prefs.migrateInputV3();prefs.recoverTapMode();
@@ -66,7 +69,7 @@ public final class MainActivity extends Activity {
                 v.setPadding(b.left,b.top,b.right,b.bottom);return insets;
             });
         }
-        TextView eyebrow=text("CORNER BLOOM  /  0.2.0",11,PURPLE);eyebrow.setLetterSpacing(.17f);content.addView(eyebrow);gap(content,9);
+        TextView eyebrow=text("CORNER BLOOM  /  0.2.1",11,PURPLE);eyebrow.setLetterSpacing(.17f);content.addView(eyebrow);gap(content,9);
         TextView name=text("角落绽放",32,INK);name.setTypeface(null,Typeface.BOLD);content.addView(name);gap(content,7);
         content.addView(text("轻轻一划，让常用应用从指尖散开。",14,MUTED));gap(content,22);
 
@@ -74,9 +77,12 @@ public final class MainActivity extends Activity {
         status=text("正在读取本机应用…",13,MUTED);setup.addView(status);gap(setup,12);
         start=button("开启角落手势",true);setup.addView(start,new LinearLayout.LayoutParams(-1,dp(50)));
         start.setOnClickListener(v->toggleService());
+        Button restore=button("入口不见了？恢复入口",false);setup.addView(restore,new LinearLayout.LayoutParams(-1,dp(48)));
+        restore.setOnClickListener(v->startOverlay(OverlayService.RESTORE));
         Button permission=button("悬浮窗权限",false);setup.addView(permission,new LinearLayout.LayoutParams(-1,dp(48)));
         permission.setOnClickListener(v->openOverlayPermission());
         gap(setup,5);setup.addView(text("入口默认在右下角，底部预留 36 dp。若与系统手势冲突，可以在下方挪动入口。",12,MUTED));
+        setup.addView(text("恢复入口会重新挂载悬浮窗。其他悬浮窗可能遮住亮条；安全页面也可能由系统暂时隐藏悬浮窗，离开后再试。",12,MUTED));
 
         LinearLayout background=card(content);title(background,"后台与启动");gap(background,8);
         Switch hide=preferenceSwitch(background,"在最近任务中隐藏","hide_recents",false);
@@ -277,20 +283,27 @@ public final class MainActivity extends Activity {
         catch(ActivityNotFoundException e){startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName())));}
     }
     private void toggleService(){
-        if(OverlayService.running){stopService(new Intent(this,OverlayService.class));new Handler(Looper.getMainLooper()).postDelayed(this::refreshStatus,150);return;}
+        if(OverlayService.running||prefs.get("overlay_enabled",false)){
+            prefs.set("overlay_enabled",false);stopService(new Intent(this,OverlayService.class));
+            ui.postDelayed(this::refreshStatus,150);return;
+        }
+        startOverlay(null);
+    }
+    private void startOverlay(String action){
         if(!ready){Toast.makeText(this,"应用列表还在读取，请稍等",Toast.LENGTH_SHORT).show();return;}
         if(AppEntry.favorites(all,prefs).isEmpty()){Toast.makeText(this,"先选择几个常用应用",Toast.LENGTH_SHORT).show();return;}
         if(!Settings.canDrawOverlays(this)){openOverlayPermission();return;}
         if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},42);
-        try{startForegroundService(new Intent(this,OverlayService.class));}
+        try{startForegroundService(new Intent(this,OverlayService.class).setAction(action));}
         catch(RuntimeException e){Toast.makeText(this,"启动失败，请检查悬浮窗和后台运行权限",Toast.LENGTH_LONG).show();}
-        new Handler(Looper.getMainLooper()).postDelayed(this::refreshStatus,500);
+        ui.postDelayed(this::refreshStatus,500);
     }
     private void refreshStatus(){
         boolean on=OverlayService.running;
-        start.setText(on?"关闭角落手势":"开启角落手势");
-        status.setText(on?"入口已开启 · 可以切到其他应用试用":Settings.canDrawOverlays(this)?"悬浮窗权限已就绪，点击开启":"先允许悬浮窗，再开启角落手势");
+        start.setText(on||prefs.get("overlay_enabled",false)?"关闭角落手势":"开启角落手势");
+        status.setText(!Settings.canDrawOverlays(this)?"请允许悬浮窗权限，再恢复入口":on?OverlayService.statusHint:
+                prefs.get("overlay_enabled",false)?"服务已停止，可点恢复入口重新开启":"角落手势未开启");
         status.setTextColor(on?0xff83e6cb:MUTED);
     }
     private void refreshApps(){
@@ -348,7 +361,19 @@ public final class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("调整顺序 · 内圈到外圈").setView(scroll).setNegativeButton("取消",null)
                 .setPositiveButton("保存",(d,w)->{List<String> ids=new ArrayList<>();for(AppEntry a:ordered)ids.add(a.id());prefs.selected(ids);practice.reset();refreshApps();}).show();
     }
-    @Override public void onResume(){super.onResume();foreground=true;if(prefs!=null)applyRecentsPreference();if(status!=null)refreshStatus();refreshBootHint();refreshTapHint();}
-    @Override public void onPause(){foreground=false;cancelCalibration();if(prefs!=null)applyRecentsPreference();super.onPause();}
+    @Override public void onResume(){
+        super.onResume();foreground=true;
+        if(prefs!=null){
+            applyRecentsPreference();
+            // Only the visible Activity can request a fresh start after a vendor kill.
+            if(prefs.get("overlay_enabled",false)&&Settings.canDrawOverlays(this)){
+                try{startForegroundService(new Intent(this,OverlayService.class).setAction(OverlayService.CHECK));}
+                catch(RuntimeException e){android.util.Log.w("CornerBloom","Unable to check overlay from settings",e);}
+            }
+        }
+        if(status!=null)refreshStatus();refreshBootHint();refreshTapHint();
+        ui.removeCallbacks(refreshRuntime);ui.postDelayed(refreshRuntime,1000);
+    }
+    @Override public void onPause(){foreground=false;ui.removeCallbacks(refreshRuntime);cancelCalibration();if(prefs!=null)applyRecentsPreference();super.onPause();}
     @Override protected void onDestroy(){ui.removeCallbacksAndMessages(null);cancelCalibration();worker.shutdownNow();if(practice!=null)practice.reset();super.onDestroy();}
 }

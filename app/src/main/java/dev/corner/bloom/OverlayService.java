@@ -14,7 +14,9 @@ import java.util.concurrent.*;
 
 public final class OverlayService extends Service {
     static final String STOP="dev.corner.bloom.STOP";
+    static final String RESTORE="dev.corner.bloom.RESTORE",CHECK="dev.corner.bloom.CHECK";
     static volatile boolean running;
+    static volatile String statusHint="角落手势未开启";
     private WindowManager wm;
     private WindowManager.LayoutParams params;
     private BloomView view;
@@ -25,6 +27,12 @@ public final class OverlayService extends Service {
     private TapClassifier tapClassifier;
     private DeleteHold deleteHold;
     private boolean replaying;
+    private boolean touching,screenOff,destroying,restoring,windowBroken;
+    private String windowError="";
+    private Notification.Builder notification;
+    private String notifiedHint;
+    private final OverlayRecovery recovery=new OverlayRecovery();
+    private final Runnable healthCheck=()->checkWindows();
     private int replayGeneration;
     private int screenW,screenH;
     private RectF trigger;
@@ -33,51 +41,66 @@ public final class OverlayService extends Service {
     private final ExecutorService loader=Executors.newSingleThreadExecutor();
     private int generation;
     private final android.content.SharedPreferences.OnSharedPreferenceChangeListener changes=(sp,key)->{
-        if("hide_recents".equals(key)||"start_on_boot".equals(key)||"boot_failed".equals(key))return;
+        if("hide_recents".equals(key)||"start_on_boot".equals(key)||"boot_failed".equals(key)||"overlay_enabled".equals(key))return;
         if(view==null)return;
         if(deleteHold!=null)deleteHold.cancel();
         cancelTapReplay();
-        view.reset();
+        touching=false;view.reset();
         view.setApps(AppEntry.favorites(all,prefs));measure();layoutWindows();showExpanded(false);
+        recovery.request(false);scheduleHealth(0);
     };
     private final BroadcastReceiver screen=new BroadcastReceiver(){
         @Override public void onReceive(Context c,Intent i){
+            screenOff=Intent.ACTION_SCREEN_OFF.equals(i.getAction());
             if(view==null)return;
-            if(deleteHold!=null)deleteHold.cancel();
-            cancelTapReplay();
-            view.reset();showExpanded(false);
-            KeyguardManager keyguard=(KeyguardManager)getSystemService(KEYGUARD_SERVICE);
-            boolean visible=!Intent.ACTION_SCREEN_OFF.equals(i.getAction())&&!keyguard.isKeyguardLocked();
-            view.setVisibility(visible?View.VISIBLE:View.GONE);
-            if(handle!=null)handle.setVisibility(visible?View.VISIBLE:View.GONE);
+            resetInteraction();
+            recovery.request(false);checkWindows();
+            // Some keyguards update after USER_PRESENT, or never send it at all.
+            if(!screenOff)scheduleHealth(250);
         }
     };
     @Override public void onCreate(){
         super.onCreate();prefs=new Prefs(this);prefs.migrateInputV3();prefs.recoverTapMode();wm=(WindowManager)getSystemService(WINDOW_SERVICE);
+        screenOff=!((PowerManager)getSystemService(POWER_SERVICE)).isInteractive();
         tapClassifier=new TapClassifier(Math.max(dp(8),ViewConfiguration.get(this).getScaledTouchSlop()));
         deleteHold=new DeleteHold((action,delay)->main.postDelayed(action,delay),
                 ViewConfiguration.getLongPressTimeout(),80,Math.max(dp(8),ViewConfiguration.get(this).getScaledTouchSlop()));
         TapAccessibilityService.setStateListener(()->main.post(()->{
             if(view==null||!added)return;
             deleteHold.cancel();
-            cancelTapReplay();view.reset();showExpanded(false);layoutWindows();
+            touching=false;cancelTapReplay();view.reset();showExpanded(false);layoutWindows();
+            recovery.request(false);scheduleHealth(0);
         }));
         NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
         NotificationChannel channel=new NotificationChannel("gesture","角落手势",NotificationManager.IMPORTANCE_LOW);
         channel.setDescription("显示角落入口的运行状态，随时可以停止");channel.setShowBadge(false);nm.createNotificationChannel(channel);
         PendingIntent settings=PendingIntent.getActivity(this,1,new Intent(this,MainActivity.class),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent stop=PendingIntent.getService(this,2,new Intent(this,OverlayService.class).setAction(STOP),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-        Notification notification=new Notification.Builder(this,"gesture").setSmallIcon(dev.corner.bloom.R.drawable.ic_bloom)
-                .setContentTitle("角落绽放已开启").setContentText("从右下角上滑，滑到应用后松手打开")
-                .setContentIntent(settings).setOngoing(true).addAction(new Notification.Action.Builder(null,"停止",stop).build()).build();
-        startForeground(7,notification);
+        PendingIntent restore=PendingIntent.getService(this,3,new Intent(this,OverlayService.class).setAction(RESTORE),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+        notification=new Notification.Builder(this,"gesture").setSmallIcon(dev.corner.bloom.R.drawable.ic_bloom)
+                .setContentTitle("角落绽放").setContentText("正在恢复角落入口…").setOnlyAlertOnce(true)
+                .setContentIntent(settings).setOngoing(true)
+                .addAction(new Notification.Action.Builder(null,"恢复入口",restore).build())
+                .addAction(new Notification.Action.Builder(null,"停止",stop).build());
+        startForeground(7,notification.build());
         IntentFilter filter=new IntentFilter();filter.addAction(Intent.ACTION_SCREEN_OFF);filter.addAction(Intent.ACTION_SCREEN_ON);filter.addAction(Intent.ACTION_USER_PRESENT);
         if(Build.VERSION.SDK_INT>=33)registerReceiver(screen,filter,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(screen,filter);
         getSharedPreferences("bloom",MODE_PRIVATE).registerOnSharedPreferenceChangeListener(changes);
     }
     @Override public int onStartCommand(Intent intent,int flags,int startId){
-        if(intent!=null&&STOP.equals(intent.getAction())){stopSelf();return START_NOT_STICKY;}
-        if(!Settings.canDrawOverlays(this)){stopSelf();return START_NOT_STICKY;}
+        String action=intent==null?null:intent.getAction();
+        if(STOP.equals(action)){
+            prefs.set("overlay_enabled",false);running=false;statusHint="角落手势已关闭";
+            stopSelf();return START_NOT_STICKY;
+        }
+        if((intent==null||CHECK.equals(action))&&!prefs.get("overlay_enabled",false)){
+            running=false;stopSelf();return START_NOT_STICKY;
+        }
+        if(!Settings.canDrawOverlays(this)){
+            running=false;statusHint="悬浮窗权限已关闭，请重新授权";stopSelf();return START_NOT_STICKY;
+        }
+        prefs.set("overlay_enabled",true);running=true;
+        screenOff=!((PowerManager)getSystemService(POWER_SERVICE)).isInteractive();
         if(view==null){
             view=new BloomView(this,prefs,true,new BloomView.Host(){
                 public void expand(){showExpanded(true);}
@@ -118,16 +141,97 @@ public final class OverlayService extends Service {
             handleParams.setTitle("角落绽放固定手势入口");
             if(Build.VERSION.SDK_INT>=28)handleParams.layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             if(Build.VERSION.SDK_INT>=30)handleParams.setFitInsetsTypes(0);
-            try{
-                wm.addView(view,params);added=true;
-                wm.addView(handle,handleParams);handleAdded=true;running=true;
-                prefs.set("boot_failed",false);
-                layoutWindows();
-            }
-            catch(RuntimeException e){Toast.makeText(this,"入口未能显示，请检查悬浮窗权限",Toast.LENGTH_LONG).show();stopSelf();return START_NOT_STICKY;}
             loadApps();
         }
-        return START_NOT_STICKY;
+        recovery.request(RESTORE.equals(action));checkWindows();
+        return START_STICKY;
+    }
+    private final OverlayRecovery.Host recoveryHost=new OverlayRecovery.Host(){
+        public boolean permitted(){return Settings.canDrawOverlays(OverlayService.this);}
+        public boolean unlocked(){
+            return !screenOff&&((PowerManager)getSystemService(POWER_SERVICE)).isInteractive()
+                    &&!((KeyguardManager)getSystemService(KEYGUARD_SERVICE)).isKeyguardLocked();
+        }
+        public boolean busy(){
+            return added&&handleAdded&&view.isAttachedToWindow()&&handle.isAttachedToWindow()
+                    &&(touching||replaying||view.interactionActive());
+        }
+        public boolean healthy(){
+            return !windowBroken&&added&&handleAdded&&view.isAttachedToWindow()&&handle.isAttachedToWindow()
+                    &&view.getVisibility()==View.VISIBLE&&handle.getVisibility()==View.VISIBLE
+                    &&handle.getAlpha()==1f&&handleParams.alpha==1f&&params.alpha==0f
+                    &&(handleParams.flags&WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)==0;
+        }
+        public void hide(){
+            if(view.getVisibility()==View.VISIBLE||handle.getVisibility()==View.VISIBLE)resetInteraction();
+            view.setVisibility(View.GONE);handle.setVisibility(View.GONE);
+        }
+        public boolean restore(boolean reattach){return restoreWindows(reattach);}
+    };
+    private void scheduleHealth(long delay){
+        main.removeCallbacks(healthCheck);
+        if(!destroying)main.postDelayed(healthCheck,delay);
+    }
+    private void checkWindows(){
+        if(destroying||view==null||!running)return;
+        if(!prefs.get("overlay_enabled",false)){
+            running=false;statusHint="角落手势已关闭";stopSelf();return;
+        }
+        OverlayRecovery.State state=recovery.check(SystemClock.uptimeMillis(),recoveryHost);
+        if(state==OverlayRecovery.State.PERMISSION){
+            statusHint="悬浮窗权限已关闭，请重新授权";running=false;
+            resetInteraction();removeWindows();stopSelf();return;
+        }
+        String hint=state==OverlayRecovery.State.HIDDEN?"锁屏或息屏中，解锁后恢复入口":
+                state==OverlayRecovery.State.RETRY?"入口异常，正在重试恢复":
+                state==OverlayRecovery.State.FAILED?"入口恢复失败，请点恢复入口重试（"+windowError+"）":
+                state==OverlayRecovery.State.BUSY?"正在处理手势，结束后检查入口状态":
+                "服务运行 · 入口已挂载"+(prefs.get("guide",true)?"":" · 亮条已隐藏");
+        statusHint=hint;
+        if(!hint.equals(notifiedHint)){
+            notifiedHint=hint;
+            ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(7,notification.setContentText(hint).build());
+        }
+        // No wake lock/alarm: checks pause while the display sleeps. Healthy windows
+        // are never re-added periodically just to compete with another overlay.
+        if(!screenOff&&((PowerManager)getSystemService(POWER_SERVICE)).isInteractive())
+            scheduleHealth(state==OverlayRecovery.State.RETRY?1000:
+                    state==OverlayRecovery.State.HIDDEN||state==OverlayRecovery.State.BUSY?2000:5000);
+    }
+    private void resetInteraction(){
+        touching=false;
+        if(deleteHold!=null)deleteHold.cancel();
+        cancelTapReplay();view.reset();showExpanded(false);
+    }
+    private boolean restoreWindows(boolean reattach){
+        restoring=true;
+        try{
+            resetInteraction();
+            if(reattach||windowBroken||!added||!handleAdded||!view.isAttachedToWindow()||!handle.isAttachedToWindow()){
+                removeWindows();
+                // Keep canvas below its input handle; neither window moves on a gesture.
+                wm.addView(view,params);added=true;
+                wm.addView(handle,handleParams);handleAdded=true;
+            }
+            measure();
+            view.setVisibility(View.VISIBLE);handle.setVisibility(View.VISIBLE);handle.setAlpha(1f);
+            if(!layoutWindows())return false;
+            windowBroken=false;windowError="";prefs.set("boot_failed",false);
+            return true;
+        }catch(RuntimeException e){
+            recordWindowFailure(e);removeWindows();return false;
+        }finally{restoring=false;}
+    }
+    private void removeWindows(){
+        if(handle!=null&&(handleAdded||handle.isAttachedToWindow()))try{wm.removeViewImmediate(handle);}catch(RuntimeException ignored){}
+        if(view!=null&&(added||view.isAttachedToWindow()))try{wm.removeViewImmediate(view);}catch(RuntimeException ignored){}
+        handleAdded=false;added=false;
+    }
+    private void recordWindowFailure(RuntimeException error){
+        windowBroken=true;windowError=error.getClass().getSimpleName();
+        statusHint="入口窗口异常，正在恢复";
+        android.util.Log.w("CornerBloom","Overlay window operation failed",error);
+        if(!restoring)scheduleHealth(250);
     }
     private void loadApps(){
         final int request=++generation;
@@ -141,6 +245,8 @@ public final class OverlayService extends Service {
     private boolean forwardHandleTouch(MotionEvent event){
         if(replaying)return true;
         int action=event.getActionMasked();float x=event.getRawX(),y=event.getRawY();
+        if(action==MotionEvent.ACTION_DOWN)touching=true;
+        else if(action==MotionEvent.ACTION_UP||action==MotionEvent.ACTION_CANCEL)touching=false;
         if(action==MotionEvent.ACTION_DOWN)deleteHold.down(x,y,deleteSource(x,y));
         else if(action==MotionEvent.ACTION_MOVE){
             for(int h=0;h<event.getHistorySize();h++)
@@ -213,7 +319,7 @@ public final class OverlayService extends Service {
         if(tapClassifier!=null)tapClassifier.cancel();
         if(handleParams==null)return;
         handleParams.alpha=1;handleParams.flags&=~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-        if(handleAdded){try{wm.updateViewLayout(handle,handleParams);}catch(RuntimeException e){stopSelf();}}
+        if(handleAdded){try{wm.updateViewLayout(handle,handleParams);}catch(RuntimeException e){recordWindowFailure(e);}}
     }
     private void measure(){
         DisplayMetrics metrics=new DisplayMetrics();wm.getDefaultDisplay().getRealMetrics(metrics);
@@ -226,8 +332,8 @@ public final class OverlayService extends Service {
     }
     // Called only for configuration/preferences. Gesture callbacks NEVER resize or move
     // either window: the input handle and the rendering surface have independent bounds.
-    private void layoutWindows(){
-        if(view==null||params==null)return;
+    private boolean layoutWindows(){
+        if(view==null||params==null)return false;
         // Above the IME only when replaying taps is actually available; otherwise
         // keep the keyboard-first behavior of the previous release.
         if(tapThroughReady())params.flags&=~WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
@@ -242,12 +348,13 @@ public final class OverlayService extends Service {
         try{
             if(added)wm.updateViewLayout(view,params);
             if(handleAdded)wm.updateViewLayout(handle,handleParams);
-        }catch(RuntimeException e){stopSelf();}
+        }catch(RuntimeException e){recordWindowFailure(e);return false;}
         if(handle!=null){
             handle.invalidate();
             if(Build.VERSION.SDK_INT>=29)handle.setSystemGestureExclusionRects(Collections.singletonList(
                     new Rect(0,0,(int)trigger.width(),(int)trigger.height())));
         }
+        return true;
     }
     private void showExpanded(boolean expanded){
         if(view==null||params==null)return;
@@ -257,18 +364,20 @@ public final class OverlayService extends Service {
         if(expanded)params.flags&=~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
         else params.flags|=WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
         if(handle!=null)handle.setAlpha(expanded?0f:1f);
-        if(added){try{wm.updateViewLayout(view,params);}catch(RuntimeException e){stopSelf();}}
+        if(added){try{wm.updateViewLayout(view,params);}catch(RuntimeException e){recordWindowFailure(e);}}
     }
     @Override public void onConfigurationChanged(Configuration c){
-        super.onConfigurationChanged(c);if(view==null)return;deleteHold.cancel();cancelTapReplay();view.reset();measure();layoutWindows();showExpanded(false);
+        super.onConfigurationChanged(c);if(view==null)return;resetInteraction();measure();layoutWindows();
+        recovery.request(false);scheduleHealth(0);
     }
     @Override public void onDestroy(){
+        destroying=true;
         if(deleteHold!=null)deleteHold.cancel();
+        if(running)statusHint="服务已停止，可点恢复入口重新开启";
         running=false;generation++;replayGeneration++;TapAccessibilityService.setStateListener(null);loader.shutdownNow();main.removeCallbacksAndMessages(null);
         getSharedPreferences("bloom",MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(changes);
         try{unregisterReceiver(screen);}catch(IllegalArgumentException ignored){}
-        if(added&&view!=null){view.reset();try{wm.removeViewImmediate(view);}catch(RuntimeException ignored){}}
-        if(handleAdded&&handle!=null){try{wm.removeViewImmediate(handle);}catch(RuntimeException ignored){}}
+        if(view!=null)view.reset();removeWindows();
         handleAdded=false;handle=null;added=false;view=null;stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();
     }
     @Override public IBinder onBind(Intent i){return null;}

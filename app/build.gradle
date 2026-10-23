@@ -2,6 +2,6 @@ plugins { id 'com.android.application' }
 android {
     namespace 'dev.corner.bloom'
     compileSdk 35
-    defaultConfig { applicationId 'dev.corner.bloom'; minSdk 26; targetSdk 35; versionCode 11; versionName '0.2.0' }
+    defaultConfig { applicationId 'dev.corner.bloom'; minSdk 26; targetSdk 35; versionCode 12; versionName '0.2.1' }
     compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
 }
