@@ -8,6 +8,17 @@ ACTUAL="$(git -C "$WORK" rev-parse HEAD)"
 if [ "$ACTUAL" != "$EXPECTED" ]; then echo "Unexpected upstream commit $ACTUAL"; exit 1; fi
 python3 "$ROOT/mobile-codex-zhcn/apply_zhcn.py" "$WORK" --parallel
 cd "$WORK"
+# Android WebView serves only explicitly allowed packaged files.
+# Register the added Chinese catalog without weakening the origin/path allowlist.
+python3 - <<'PY'
+from pathlib import Path
+file=Path('app/src/main/java/dev/mobilecodex/app/MainActivity.java')
+source=file.read_text(encoding='utf-8')
+old='path.equals("/translations.js") || path.equals("/locale.js")'
+new='path.equals("/translations.js") || path.equals("/translations-zh.js") || path.equals("/locale.js")'
+assert source.count(old)==1, 'Unexpected WebView routing source'
+file.write_text(source.replace(old,new),encoding='utf-8')
+PY
 # Reuse signed upstream APK runtime assets to avoid retired historical Termux packages.
 # Verify GitHub release artifact against the published SHA-256 before extraction.
 APK="$RUNNER_TEMP/mobile-codex-upstream-v0.3.9.apk"
