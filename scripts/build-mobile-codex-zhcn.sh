@@ -20,7 +20,7 @@ path=Path('tools/devtools-lock.json')
 lock=json.loads(path.read_text())
 assert lock['poolUrl']=='https://packages.termux.dev/apt/termux-main/'
 lock['poolUrl']='https://repository.su/termux/termux-main/'
-path.write_text(json.dumps(lock,ensure_ascii=False,indent=2)+'\\n')
+path.write_text(json.dumps(lock,ensure_ascii=False,indent=2))
 PY
 python3 tools/prepare_devtools.py
 python3 tools/prepare_devtools.py --verify
