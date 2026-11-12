@@ -11,6 +11,17 @@ cd "$WORK"
 python3 -m pip install -r tools/requirements-devtools.txt
 python3 tools/prepare_runtime.py
 python3 tools/build_native.py --ndk "$ANDROID_HOME/ndk/28.2.13676358"
+# Official Termux pool rotated an older pinned package; use an archive mirror.
+# Retain all upstream SHA-256 hashes and expected package filenames unchanged.
+python3 - <<'PY'
+from pathlib import Path
+import json
+path=Path('tools/devtools-lock.json')
+lock=json.loads(path.read_text())
+assert lock['poolUrl']=='https://packages.termux.dev/apt/termux-main/'
+lock['poolUrl']='https://repository.su/termux/termux-main/'
+path.write_text(json.dumps(lock,ensure_ascii=False,indent=2)+'\\n')
+PY
 python3 tools/prepare_devtools.py
 python3 tools/prepare_devtools.py --verify
 npm ci --ignore-scripts
