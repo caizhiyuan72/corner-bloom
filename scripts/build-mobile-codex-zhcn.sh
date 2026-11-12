@@ -8,22 +8,23 @@ ACTUAL="$(git -C "$WORK" rev-parse HEAD)"
 if [ "$ACTUAL" != "$EXPECTED" ]; then echo "Unexpected upstream commit $ACTUAL"; exit 1; fi
 python3 "$ROOT/mobile-codex-zhcn/apply_zhcn.py" "$WORK" --parallel
 cd "$WORK"
-python3 -m pip install -r tools/requirements-devtools.txt
-python3 tools/prepare_runtime.py
-python3 tools/build_native.py --ndk "$ANDROID_HOME/ndk/28.2.13676358"
-# Official Termux pool rotated an older pinned package; use an archive mirror.
-# Retain all upstream SHA-256 hashes and expected package filenames unchanged.
-python3 - <<'PY'
-from pathlib import Path
-import json
-path=Path('tools/devtools-lock.json')
-lock=json.loads(path.read_text())
-assert lock['poolUrl']=='https://packages.termux.dev/apt/termux-main/'
-lock['poolUrl']='https://termux.librehat.com/apt/termux-main/'
-path.write_text(json.dumps(lock,ensure_ascii=False,indent=2))
-PY
-python3 tools/prepare_devtools.py
-python3 tools/prepare_devtools.py --verify
+# Reuse signed upstream APK runtime assets to avoid retired historical Termux packages.
+# Verify GitHub release artifact against the published SHA-256 before extraction.
+APK="$RUNNER_TEMP/mobile-codex-upstream-v0.3.9.apk"
+curl --fail --location --retry 3 --retry-delay 4 \
+  "https://github.com/nokryong/mobile-codex/releases/download/v0.3.9/mobile-codex-0.3.9-arm64.apk" \
+  --output "$APK"
+echo "48f05bd8812a5907a4e80bf8d228afc754875f497c0c380e94a06e1db2ec6731  $APK" | sha256sum -c -
+EXTRACT="$RUNNER_TEMP/mobile-codex-release-assets"
+mkdir -p "$EXTRACT"
+unzip -q "$APK" "assets/runtime/*" "assets/devtools/*" "lib/arm64-v8a/*" -d "$EXTRACT"
+mkdir -p app/src/main/assets/runtime app/src/main/assets/devtools app/src/main/jniLibs/arm64-v8a
+cp -a "$EXTRACT/assets/runtime/." app/src/main/assets/runtime/
+cp -a "$EXTRACT/assets/devtools/." app/src/main/assets/devtools/
+cp -a "$EXTRACT/lib/arm64-v8a/." app/src/main/jniLibs/arm64-v8a/
+test -s app/src/main/assets/devtools/payload.zip
+test -s app/src/main/assets/devtools/manifest.json
+test -s app/src/main/jniLibs/arm64-v8a/libcodex.so
 npm ci --ignore-scripts
 npm test
 ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug
