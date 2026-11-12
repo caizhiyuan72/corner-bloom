@@ -1,0 +1,39 @@
+name: Mobile Codex zh-CN Android APK
+on:
+  push:
+    branches: [build-mobile-codex-zhcn]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out localization scripts
+        uses: actions/checkout@v4
+      - name: Configure Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Configure Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+      - name: Install Android NDK
+        run: sdkmanager --install "ndk;28.2.13676358"
+      - name: Build APK from pinned upstream source
+        run: bash ./scripts/build-mobile-codex-zhcn.sh
+      - name: Upload test APK and checksums
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-codex-zhcn-arm64-debug
+          path: apk-output/
+          if-no-files-found: warn
+          retention-days: 7
