@@ -214,7 +214,7 @@ final class ApiProviderStore {
         addConfig(args, prefix + "base_url", p.optString("baseUrl"));
         addConfig(args, prefix + "wire_api", "responses");
         addConfig(args, prefix + "env_key", ENV);
-        builder.command().addAll(args);
+        builder.command().addAll(1, args);
     }
     private static void addConfig(List<String> args, String name, String value) {
         args.add("-c"); args.add(name + "=" + quote(value));
