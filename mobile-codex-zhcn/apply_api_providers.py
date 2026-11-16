@@ -44,7 +44,7 @@ def main(root):
       '    /** Return the most recent messages in their original chronological order. */',
       "Engine profile projection")
     s=replace_once(s,
-      'case "models.refresh" -> {\n                         if (!ready) start();',
+      'case "models.refresh" -> {\n                        if (!ready) start();',
       'case "providers.save" -> { ensureEngineIdle(); apiProviders.save(args); publish(); reply.complete(snapshot(), null); }\n'
       '                    case "providers.remove" -> {\n'
       '                        ensureEngineIdle(); boolean wasActive = args.optString("id").equals(apiProviders.activeId());\n'
@@ -67,7 +67,7 @@ def main(root):
       '                        }\n'
       '                        publish(); reply.complete(snapshot(), null);\n'
       '                    }\n'
-      '                    case "models.refresh" -> {\n                         if (!ready) start();\n'
+      '                    case "models.refresh" -> {\n                        if (!ready) start();\n'
       '                         if (apiProviders.isActive()) { models = apiProviders.models(); publish(); reply.complete(obj("models", models), null); break; }',
       "Engine actions")
     # prevent authenticating against ChatGPT when custom endpoint is selected
