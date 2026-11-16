@@ -20,6 +20,23 @@ assert source.count(old)==1, 'Unexpected WebView routing source'
 file.write_text(source.replace(old,new),encoding='utf-8')
 PY
 python3 "$ROOT/mobile-codex-zhcn/apply_api_providers.py" "$WORK"
+# Distinct Android package ID: debug signing keys from different CI runs cannot update one another.
+# Keep the original Chinese-only and English apps installed with their local data intact.
+python3 - <<'PY'
+from pathlib import Path
+gradle=Path('app/build.gradle')
+source=gradle.read_text()
+old="applicationIdSuffix '.zhcn'"
+new="applicationIdSuffix '.zhcnapi'"
+assert source.count(old)==1, 'Unexpected localized debug package ID'
+gradle.write_text(source.replace(old,new))
+manifest=Path('app/src/main/AndroidManifest.xml')
+source=manifest.read_text()
+old='android:label="Mobile Codex 中文版"'
+new='android:label="Mobile Codex 多模型版"'
+assert source.count(old)==1, 'Unexpected localized app label'
+manifest.write_text(source.replace(old,new))
+PY
 # Reuse signed upstream APK runtime assets to avoid retired historical Termux packages.
 # Verify GitHub release artifact against the published SHA-256 before extraction.
 APK="$RUNNER_TEMP/mobile-codex-upstream-v0.3.9.apk"
@@ -42,6 +59,6 @@ npm test
 ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug
 test -s app/build/outputs/apk/debug/app-debug.apk
 mkdir -p "$ROOT/apk-output"
-cp app/build/outputs/apk/debug/app-debug.apk "$ROOT/apk-output/mobile-codex-v0.3.9-zhCN-multiAPI-arm64-debug.apk"
+cp app/build/outputs/apk/debug/app-debug.apk "$ROOT/apk-output/mobile-codex-v0.3.9-zhCN-multiAPI-separate-arm64-debug.apk"
 sha256sum "$ROOT/apk-output/"*.apk > "$ROOT/apk-output/SHA256SUMS.txt"
 echo "Build succeeded. APK is in apk-output/"
