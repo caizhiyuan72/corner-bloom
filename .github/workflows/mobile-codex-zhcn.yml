@@ -1,7 +1,7 @@
-name: Mobile Codex zh-CN Android APK
+name: Mobile Codex zh-CN Multi-API Android APK
 on:
   push:
-    branches: [build-mobile-codex-zhcn]
+    branches: [feature/mobile-codex-multi-api]
   workflow_dispatch:
 permissions:
   contents: read
@@ -33,7 +33,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mobile-codex-zhcn-arm64-debug
+          name: mobile-codex-zhcn-multiAPI-arm64-debug
           path: apk-output/
           if-no-files-found: warn
           retention-days: 7
