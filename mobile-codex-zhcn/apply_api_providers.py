@@ -103,8 +103,8 @@ def main(root):
       '            else if (foregroundRuntime) try { models = call("model/list", obj("limit", 100, "includeHidden", false)).optJSONArray("data"); }',
       "Engine initial models")
     s=replace_once(s,
-      'try { models = call("model/list", obj("limit", 100, "includeHidden", false)).optJSONArray("data"); }',
-      'try { models = apiProviders.isActive() ? apiProviders.models() : call("model/list", obj("limit", 100, "includeHidden", false)).optJSONArray("data"); }',
+      '        try { models = call("model/list", obj("limit", 100, "includeHidden", false)).optJSONArray("data"); }',
+      '        try { models = apiProviders.isActive() ? apiProviders.models() : call("model/list", obj("limit", 100, "includeHidden", false)).optJSONArray("data"); }',
       "Engine promoted models")
     s=replace_once(s,
       'try { JSONArray data = call("model/list", obj("limit", 100)).optJSONArray("data"); if (data != null) models = data; }',
