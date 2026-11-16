@@ -19,6 +19,7 @@ new='path.equals("/translations.js") || path.equals("/translations-zh.js") || pa
 assert source.count(old)==1, 'Unexpected WebView routing source'
 file.write_text(source.replace(old,new),encoding='utf-8')
 PY
+python3 "$ROOT/mobile-codex-zhcn/apply_api_providers.py" "$WORK"
 # Reuse signed upstream APK runtime assets to avoid retired historical Termux packages.
 # Verify GitHub release artifact against the published SHA-256 before extraction.
 APK="$RUNNER_TEMP/mobile-codex-upstream-v0.3.9.apk"
@@ -41,6 +42,6 @@ npm test
 ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug
 test -s app/build/outputs/apk/debug/app-debug.apk
 mkdir -p "$ROOT/apk-output"
-cp app/build/outputs/apk/debug/app-debug.apk "$ROOT/apk-output/mobile-codex-v0.3.9-zhCN-arm64-debug.apk"
+cp app/build/outputs/apk/debug/app-debug.apk "$ROOT/apk-output/mobile-codex-v0.3.9-zhCN-multiAPI-arm64-debug.apk"
 sha256sum "$ROOT/apk-output/"*.apk > "$ROOT/apk-output/SHA256SUMS.txt"
 echo "Build succeeded. APK is in apk-output/"
