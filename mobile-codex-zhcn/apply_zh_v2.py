@@ -262,6 +262,82 @@ EXTRA.update({
   "돌아가기":"返回"
 })
 
+
+NATIVE_EXTRA = {
+  "캐릭터팩 설정을 저장할 수 없습니다.":"无法保存角色包设置。",
+  "유효한 캐릭터팩이 아닙니다.":"角色包无效。",
+  "캐릭터 폴더를 읽지 못했습니다.":"无法读取角色文件夹。",
+  "캐릭터팩이 너무 많습니다.":"角色包数量过多。",
+  "팩 폴더를 읽지 못했습니다.":"无法读取素材包文件夹。",
+  "팩 파일 수가 너무 많습니다.":"素材包文件数量过多。",
+  "mapping.json이 없습니다.":"缺少 mapping.json。",
+  "mapping.json을 열 수 없습니다.":"无法打开 mapping.json。",
+  "아이콘이 없습니다: ":"找不到图标：",
+  "지원하지 않는 이미지입니다: ":"不支持的图片：",
+  "기본 캐릭터":"默认角色",
+  "캐릭터팩을 읽지 못했습니다.":"无法读取角色包。",
+  "에이전트 연결을 종료하고 있습니다. 잠시 뒤 다시 시도해 주세요.":"智能体连接正在关闭，请稍后重试。",
+  "진행 중인 설치 또는 로그인을 먼저 마쳐 주세요.":"请先完成当前安装或登录。"
+}
+EXTRA.update(NATIVE_EXTRA)
+
+def native_errors_chinese(s):
+    # Only the app's own Korean error/label literals are localized.
+    # Korean text in files or user content is never modified.
+    s=patch(s,
+      "import static dev.mobilecodex.app.core.Json.obj;",
+      "import static dev.mobilecodex.app.core.Json.obj;\nimport static dev.mobilecodex.app.core.Texts.t;",
+      "native character pack t import")
+    return wrap_hangul_literals(s)
+
+def bridge_errors_chinese(s):
+    s=patch(s,
+      "import static dev.mobilecodex.app.core.Json.*;",
+      "import static dev.mobilecodex.app.core.Json.*;\nimport static dev.mobilecodex.app.core.Texts.t;",
+      "native agent bridge t import")
+    return wrap_hangul_literals(s)
+
+def wrap_hangul_literals(s):
+    # Do not alter protocol IDs, comments or user content.
+    string_literal=re.compile(r'"(?:[^"\\]|\\.)*"')
+    result=[]
+    last=0
+    for m in string_literal.finditer(s):
+        result.append(s[last:m.start()])
+        item=m.group(0)
+        if HANGUL.search(item):
+            result.append("t("+item+")")
+        else: result.append(item)
+        last=m.end()
+    result.append(s[last:])
+    return "".join(result)
+
+def live_chinese(s):
+    for old,new in [
+      ("hanul:'한울', haetsal:'햇살'","hanul:'Hanul（韩语）', haetsal:'Haetsal（韩语）'"),
+      ("['한국어',","['韩语',"),
+      ("['미국 영어',","['美式英语',"),
+      ("['독일어',","['德语',"),
+      ("{label:'기타',","{label:'其他',")
+    ]:
+        s=patch(s,old,new,"voice names and groups")
+    return s
+
+EXTRA.update({
+  "음성 대화가 종료되었습니다.":"语音对话已结束。",
+  "음성 대화가 중단되었습니다.":"语音对话已中断。",
+  "마이크 켜기":"打开麦克风",
+  "마이크 끄기":"关闭麦克风",
+  "마이크 꺼짐":"麦克风已关闭",
+  "듣고 있어요":"正在聆听",
+  "연결 중…":"连接中…",
+  "음성 설정":"语音设置",
+  "대화가 종료되었습니다.":"对话已结束。",
+  "잘못된 로그인 응답입니다.":"登录响应无效。",
+  "에이전트 설치를 시작합니다.":"开始安装智能体。",
+  "모델 목록을 새로고침해 주세요.":"请刷新模型列表。"
+})
+
 def main(root):
     p=Path(root)
     def edit(relative,fn): rewrite(p/relative,fn)
@@ -275,6 +351,9 @@ def main(root):
     edit("app/src/main/assets/web/locale.js",locale_chinese)
     edit("app/src/main/java/dev/mobilecodex/app/AppLanguage.java",app_lang_chinese)
     edit("app/src/test/java/dev/mobilecodex/app/AgentGroupTest.java",test_group)
+    edit("app/src/main/java/dev/mobilecodex/app/CharacterPacks.java",native_errors_chinese)
+    edit("app/src/main/java/dev/mobilecodex/app/AgentBridge.java",bridge_errors_chinese)
+    edit("app/src/main/assets/web/live.js",live_chinese)
     # Group integration tests assert the text of app-generated headers, not user content.
     engine_test=p/"app/src/test/java/dev/mobilecodex/app/AgentEngineTest.java"
     original=engine_test.read_text("utf-8")
