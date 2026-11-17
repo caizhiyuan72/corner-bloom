@@ -47,7 +47,12 @@ final class ApiProviderStore {
     synchronized String activeId() {
         return prefs.getString("active", "");
     }
-    synchronized boolean isActive() { return !activeId().isBlank(); }
+    synchronized boolean isActive() {
+        try {
+            JSONObject profile = current();
+            return profile != null && !profile.optString("key").isBlank();
+        } catch (IOException invalidStoredKey) { return false; }
+    }
 
     private SecretKey secretKey(boolean create) throws Exception {
         KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
