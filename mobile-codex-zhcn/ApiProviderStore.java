@@ -7,6 +7,11 @@ import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URL;
+import java.net.HttpURLConnection;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.util.Locale;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.SecureRandom;
@@ -30,6 +35,9 @@ final class ApiProviderStore {
     private static final String ENV = "MOBILE_CODEX_CUSTOM_API_KEY";
     private static final Pattern MODEL = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/+\\-]{0,127}");
     private static final Pattern ID = Pattern.compile("api_[a-f0-9]{12}");
+    private static final int MAX_SELECTED_MODELS = 150;
+    private static final int MAX_DISCOVERED_MODELS = 350;
+    private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
     private final SharedPreferences prefs;
 
     ApiProviderStore(Context context) {
@@ -143,7 +151,7 @@ final class ApiProviderStore {
         } catch (java.net.URISyntaxException ex) { throw new IOException("Base URL 不是有效网址"); }
     }
     static JSONArray parseModels(String raw) throws IOException {
-        if (raw == null || raw.length() > 4096) throw new IOException("模型 ID 太长");
+        if (raw == null || raw.length() > 16384) throw new IOException("模型 ID 太长");
         Set<String> models = new LinkedHashSet<>();
         for (String name : raw.split("[,\\n\\r]")) {
             String model = name.trim();
@@ -151,9 +159,110 @@ final class ApiProviderStore {
             if (!MODEL.matcher(model).matches()) throw new IOException("模型 ID 只能包含字母数字及 . _ - / : +");
             models.add(model);
         }
-        if (models.isEmpty() || models.size() > 20) throw new IOException("请填写 1 至 20 个模型 ID");
+        if (models.isEmpty() || models.size() > MAX_SELECTED_MODELS) throw new IOException("请填写 1 至 " + MAX_SELECTED_MODELS + " 个模型 ID");
         return new JSONArray(models);
     }
+
+    /**
+     * Fetch an OpenAI-compatible GET /models list. This does NOT test Responses API,
+     * tool calling, availability, pricing, or model-specific permissions.
+     * The raw API key and raw server response never enter the WebView state or logs.
+     */
+    synchronized JSONArray discover(JSONObject args) throws IOException {
+        String baseUrl = validateBaseUrl(args.optString("baseUrl"));
+        String key = args.optString("apiKey", "").trim();
+        String savedId = args.optString("id", "");
+        if (key.isEmpty() && !savedId.isEmpty()) {
+            if (!ID.matcher(savedId).matches()) throw new IOException("已保存的服务商无效");
+            JSONObject saved = find(load(), savedId);
+            if (saved == null) throw new IOException("没有找到已保存的服务商");
+            if (!baseUrl.equals(validateBaseUrl(saved.optString("baseUrl"))))
+                throw new IOException("更改 API 地址后，请重新输入 API Key 以扫描模型");
+            key = saved.optString("key");
+        }
+        if (key.isEmpty() || key.length() > 4096 || key.indexOf('\n') >= 0 || key.indexOf('\r') >= 0)
+            throw new IOException("请先输入有效 API Key");
+
+        URI base;
+        try { base = new URI(baseUrl); }
+        catch (Exception error) { throw new IOException("API Base URL 无效"); }
+        String host = base.getHost();
+        if (host == null) throw new IOException("API Base URL 没有有效域名");
+        String lower = host.toLowerCase(Locale.ROOT);
+        // Avoid local-address access and accidental disclosure of the API Key.
+        if (lower.equals("localhost") || lower.endsWith(".localhost") || lower.endsWith(".local")
+                || lower.endsWith(".internal") || lower.contains(":") || lower.matches("[0-9.]+"))
+            throw new IOException("模型扫描仅支持公网 HTTPS 域名，不支持本地网络地址");
+        HttpURLConnection connection = null;
+        try {
+            String endpoint = baseUrl + "/models";
+            URL url = new URI(endpoint).toURL();
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(12000);
+            connection.setReadTimeout(18000);
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("Authorization", "Bearer " + key);
+            connection.setRequestProperty("User-Agent", "MobileCodex-zhCN-model-discovery");
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                if (status == 401 || status == 403)
+                    throw new IOException("扫描失败：API Key 无效或没有读取模型权限（HTTP " + status + "）");
+                if (status == 404 || status == 405)
+                    throw new IOException("服务商没有提供兼容的 /models 列表接口，可手动填写模型 ID（HTTP " + status + "）");
+                if (status >= 300 && status < 400)
+                    throw new IOException("服务商返回重定向，已阻止携带 API Key 跳转（HTTP " + status + "）");
+                throw new IOException("模型扫描失败，服务商返回 HTTP " + status);
+            }
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            try (InputStream input = connection.getInputStream()) {
+                byte[] buffer = new byte[8192];
+                int n;
+                while ((n = input.read(buffer)) != -1) {
+                    if (output.size() + n > MAX_RESPONSE_BYTES)
+                        throw new IOException("服务商返回的模型列表过大，请手动输入模型 ID");
+                    output.write(buffer, 0, n);
+                }
+            }
+            return parseDiscoveredModels(new String(output.toByteArray(), StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            if (e.getMessage() != null && (e.getMessage().startsWith("扫描失败")
+                    || e.getMessage().startsWith("服务商")
+                    || e.getMessage().startsWith("模型扫描失败")
+                    || e.getMessage().startsWith("API ")))
+                throw e;
+            throw new IOException("扫描失败：无法连接模型列表接口，请检查网络、证书或 API 地址");
+        } catch (Exception e) {
+            throw new IOException("扫描失败：模型列表接口响应异常");
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    /** Package-visible parser for offline unit tests. Drops malformed IDs and duplicates. */
+    static JSONArray parseDiscoveredModels(String body) throws IOException {
+        if (body == null || body.length() > MAX_RESPONSE_BYTES)
+            throw new IOException("模型列表响应过大");
+        try {
+            JSONObject parsed = new JSONObject(body);
+            JSONArray entries = parsed.optJSONArray("data");
+            if (entries == null) entries = parsed.optJSONArray("models");
+            if (entries == null) throw new IOException("接口未返回模型列表（缺少 data 数组）");
+            LinkedHashSet<String> unique = new LinkedHashSet<>();
+            for (int i = 0; i < entries.length() && unique.size() < MAX_DISCOVERED_MODELS; i++) {
+                Object item = entries.opt(i);
+                String id = item instanceof JSONObject ? ((JSONObject) item).optString("id", "")
+                    : item instanceof String ? (String) item : "";
+                if (MODEL.matcher(id).matches()) unique.add(id);
+            }
+            if (unique.isEmpty()) throw new IOException("模型列表为空或没有有效的模型 ID");
+            return new JSONArray(unique);
+        } catch (org.json.JSONException e) {
+            throw new IOException("服务商返回的不是有效的 JSON 模型列表");
+        }
+    }
+
     synchronized void save(JSONObject args) throws Exception {
         JSONArray profiles = load();
         String id = args.optString("id", "");
