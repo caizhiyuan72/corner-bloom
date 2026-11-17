@@ -26,7 +26,7 @@ from pathlib import Path
 engine=Path('app/src/main/java/dev/mobilecodex/app/Engine.java').read_text()
 ui=Path('app/src/main/assets/web/app.js').read_text()
 store=Path('app/src/main/java/dev/mobilecodex/app/ApiProviderStore.java').read_text()
-assert 'if (!accountProfiles.hasSavedLogin() && !apiProviders.isActive())' in engine
+assert 'if (!accountProfiles.hasSavedLogin()) authState = apiProviders.isActive() ? "checking" : "signed_out";' in engine
 assert 'if (!ready && !accountProfiles.hasSavedLogin() && !apiProviders.isActive())' in engine
 assert 'account = obj("type", "api_key"); authState = "signed_in";' in engine
 assert 'if (apiProviders.isActive()) models = apiProviders.models()' in engine
