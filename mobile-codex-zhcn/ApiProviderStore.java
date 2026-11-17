@@ -266,7 +266,7 @@ final class ApiProviderStore {
         }
     }
 
-    synchronized void save(JSONObject args) throws Exception {
+    synchronized String save(JSONObject args) throws Exception {
         JSONArray profiles = load();
         String id = args.optString("id", "");
         JSONObject existing = id.isBlank() ? null : find(profiles, id);
@@ -289,6 +289,7 @@ final class ApiProviderStore {
         }
         updated.put(entry);
         commit(updated);
+        return id;
     }
     synchronized void remove(String id) throws Exception {
         JSONArray profiles = load(), updated = new JSONArray();
