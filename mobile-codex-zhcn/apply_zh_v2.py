@@ -77,6 +77,10 @@ def api_models(s):
 
 def app_chinese(s):
     s=patch(s,
+        "({none:'None',minimal:'Minimal',low:'Light',medium:'Medium',high:'High',xhigh:'Extra High',max:'Max',ultra:'Ultra'})",
+        "({none:'关闭',minimal:'极低',low:'低',medium:'中',high:'高',xhigh:'超高',max:'最大',ultra:'极限'})",
+        "Chinese reasoning effort labels")
+    s=patch(s,
         '''    $('effort').value = values.some(e => e.reasoningEffort === previous) ? previous : (values.some(e => e.reasoningEffort === selected?.defaultReasoningEffort) ? selected.defaultReasoningEffort : values[0]?.reasoningEffort || '');''',
         '''    if (state.apiActive) {
       // Empty effort means "automatic": omit the optional request parameter.
