@@ -162,6 +162,21 @@ def test_language(s):
       'var context=RuntimeEnvironment.getApplication();AppLanguage.initialize(context);\n        assertEquals("设置",Texts.t("설정"));AppLanguage.set(context,"ko");',
       "default localized Chinese Android tests")
 
+def test_voices(s):
+    # These assertions explicitly test visible language labels, not voice IDs.
+    replacements={
+        "label:'한국어'":"label:'韩语'",
+        "label:'미국 영어'":"label:'美式英语'",
+        "label:'독일어'":"label:'德语'",
+        "label:'기타'":"label:'其他'",
+        "'한울'":"'Hanul（韩语）'",
+        "'햇살'":"'Haetsal（韩语）'"
+    }
+    for a,b in replacements.items():
+        if a not in s: raise RuntimeError("Voice test not found: " + a)
+        s=s.replace(a,b)
+    return s
+
 def locale_chinese(s):
     return patch(s,"localStorage.getItem('language') || 'system';","localStorage.getItem('language') || 'zh-CN';","default simplified Chinese")
 
@@ -365,6 +380,7 @@ def main(root):
     edit("app/src/main/java/dev/mobilecodex/app/CharacterPacks.java",native_errors_chinese)
     edit("app/src/main/java/dev/mobilecodex/app/AgentBridge.java",bridge_errors_chinese)
     edit("app/src/main/assets/web/live.js",live_chinese)
+    edit("tests/live-voices.test.cjs",test_voices)
     live_test=p/"tests/live-voices.test.cjs"
     original=live_test.read_text("utf-8")
     for old,new in [("'한국어'","'韩语'"),("'미국 영어'","'美式英语'"),
