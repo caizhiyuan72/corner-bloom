@@ -27,13 +27,13 @@ from pathlib import Path
 gradle=Path('app/build.gradle')
 source=gradle.read_text()
 old="applicationIdSuffix '.zhcn'"
-new="applicationIdSuffix '.zhcnapi'"
+new="applicationIdSuffix '.zhcnscan'"
 assert source.count(old)==1, 'Unexpected localized debug package ID'
 gradle.write_text(source.replace(old,new))
 manifest=Path('app/src/main/AndroidManifest.xml')
 source=manifest.read_text()
 old='android:label="Mobile Codex 中文版"'
-new='android:label="Mobile Codex 多模型版"'
+new='android:label="Mobile Codex 扫描版"'
 assert source.count(old)==1, 'Unexpected localized app label'
 manifest.write_text(source.replace(old,new))
 PY
@@ -59,6 +59,6 @@ npm test
 ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug
 test -s app/build/outputs/apk/debug/app-debug.apk
 mkdir -p "$ROOT/apk-output"
-cp app/build/outputs/apk/debug/app-debug.apk "$ROOT/apk-output/mobile-codex-v0.3.9-zhCN-multiAPI-separate-arm64-debug.apk"
+cp app/build/outputs/apk/debug/app-debug.apk "$ROOT/apk-output/mobile-codex-v0.3.9-zhCN-autoScan-arm64-debug.apk"
 sha256sum "$ROOT/apk-output/"*.apk > "$ROOT/apk-output/SHA256SUMS.txt"
 echo "Build succeeded. APK is in apk-output/"
