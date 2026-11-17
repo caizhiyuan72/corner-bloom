@@ -365,6 +365,12 @@ def main(root):
     edit("app/src/main/java/dev/mobilecodex/app/CharacterPacks.java",native_errors_chinese)
     edit("app/src/main/java/dev/mobilecodex/app/AgentBridge.java",bridge_errors_chinese)
     edit("app/src/main/assets/web/live.js",live_chinese)
+    live_test=p/"tests/live-voices.test.cjs"
+    original=live_test.read_text("utf-8")
+    for old,new in [("'한국어'","'韩语'"),("'미국 영어'","'美式英语'"),
+                    ("'독일어'","'德语'"),("'기타'","'其他'")]:
+        original=original.replace(old,new)
+    live_test.write_text(original,encoding="utf-8")
     # Group integration tests assert the text of app-generated headers, not user content.
     engine_test=p/"app/src/test/java/dev/mobilecodex/app/AgentEngineTest.java"
     original=engine_test.read_text("utf-8")
