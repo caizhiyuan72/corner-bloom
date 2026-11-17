@@ -45,7 +45,7 @@ def main(root):
       "Engine profile projection")
     s=replace_once(s,
       'case "models.refresh" -> {\n                        if (!ready) start();',
-      'case "providers.save" -> { ensureEngineIdle(); apiProviders.save(args); publish(); reply.complete(snapshot(), null); }\n'
+      'case "providers.discover" -> { reply.complete(obj("models", apiProviders.discover(args)), null); }\n'\n      '                    case "providers.save" -> { ensureEngineIdle(); apiProviders.save(args); publish(); reply.complete(snapshot(), null); }\n'
       '                    case "providers.remove" -> {\n'
       '                        ensureEngineIdle(); boolean wasActive = args.optString("id").equals(apiProviders.activeId());\n'
       '                        if (wasActive) stopCodex();\n'
