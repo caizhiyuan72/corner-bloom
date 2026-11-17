@@ -209,6 +209,12 @@ def main(root):
     edit("app/src/main/assets/web/locale.js",locale_chinese)
     edit("app/src/main/java/dev/mobilecodex/app/AppLanguage.java",app_lang_chinese)
     edit("app/src/test/java/dev/mobilecodex/app/AgentGroupTest.java",test_group)
+    # Group integration tests assert the text of app-generated headers, not user content.
+    engine_test=p/"app/src/test/java/dev/mobilecodex/app/AgentEngineTest.java"
+    original=engine_test.read_text("utf-8")
+    original=original.replace('[그룹 대화]', '[群组对话]').replace('[사용자]', '[用户]')
+    engine_test.write_text(original,encoding="utf-8")
+
     # Add missing Korean->Chinese dynamic UI messages to both native and WebView catalogs.
     file=p/"app/src/main/assets/translations-zh-CN.json"
     catalog=json.loads(file.read_text("utf-8"))
