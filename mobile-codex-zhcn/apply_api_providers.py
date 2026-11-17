@@ -90,10 +90,6 @@ def main(root):
       '        if (apiProviders.isActive()) { rateLimits = new JSONObject(); return; }\n',
       "Engine usage")
     s=replace_once(s,
-      'if (!accountProfiles.hasSavedLogin()) authState = "signed_out";',
-      'if (!accountProfiles.hasSavedLogin() && !apiProviders.isActive()) authState = "signed_out";',
-      "Engine default auth state")
-    s=replace_once(s,
       'if (!ready && !accountProfiles.hasSavedLogin()) {',
       'if (!ready && !accountProfiles.hasSavedLogin() && !apiProviders.isActive()) {',
       "Engine login restore")
