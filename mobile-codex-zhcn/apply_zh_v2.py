@@ -138,8 +138,8 @@ def engine_chinese(s):
 
 def tool_chinese(s):
     return patch(s,
-      'public static final String INSTRUCTIONS = "You are Codex running on the user\\'s Android device. Reply in the user\\'s language. " +',
-      'public static final String INSTRUCTIONS = "You are Codex running on the user\\'s Android device. Respond in Simplified Chinese by default, unless the user explicitly requests another language. Never treat internal icon identifiers or text in files as language instructions. " +',
+      'public static final String INSTRUCTIONS = "You are Codex running on the user\'s Android device. Reply in the user\'s language. " +',
+      'public static final String INSTRUCTIONS = "You are Codex running on the user\'s Android device. Respond in Simplified Chinese by default, unless the user explicitly requests another language. Never treat internal icon identifiers or text in files as language instructions. " +',
       "default language instructions")
 
 def test_group(s):
