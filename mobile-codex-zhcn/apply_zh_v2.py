@@ -387,6 +387,17 @@ def main(root):
                     ("'독일어'","'德语'"),("'기타'","'其他'")]:
         original=original.replace(old,new)
     live_test.write_text(original,encoding="utf-8")
+    # Assertions of localized UI labels must track Chinese display strings.
+    original=live_test.read_text("utf-8")
+    original=original.replace("'한울'", "'Hanul（韩语）'").replace("'햇살'", "'Haetsal（韩语）'")
+    live_test.write_text(original,encoding="utf-8")
+    ui_test=p/"tests/ui.test.cjs"
+    original=ui_test.read_text("utf-8")
+    original=original.replace("assert.equal(effortHeading.textContent, 'Ultra');",
+                              "assert.equal(effortHeading.textContent, '极限');")
+    original=original.replace("assert.equal(effortHeading.textContent, 'Ultra')",
+                              "assert.equal(effortHeading.textContent, '极限')")
+    ui_test.write_text(original,encoding="utf-8")
     # Group integration tests assert the text of app-generated headers, not user content.
     engine_test=p/"app/src/test/java/dev/mobilecodex/app/AgentEngineTest.java"
     original=engine_test.read_text("utf-8")
