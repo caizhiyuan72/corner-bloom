@@ -83,8 +83,11 @@ final class ApiProviderStore {
     private void commit(JSONArray profiles) throws IOException {
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            byte[] iv = new byte[12]; new SecureRandom().nextBytes(iv);
-            cipher.init(Cipher.ENCRYPT_MODE, secretKey(true), new GCMParameterSpec(128, iv));
+            // AndroidKeyStore uses randomized encryption by default and rejects caller-provided IVs.
+            // Let the provider generate the IV, then persist it with the ciphertext.
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey(true));
+            byte[] iv = cipher.getIV();
+            if (iv == null || iv.length != 12) throw new IOException("设备加密模块返回异常 IV 长度");
             byte[] ciphertext = cipher.doFinal(profiles.toString().getBytes(StandardCharsets.UTF_8));
             byte[] packed = new byte[iv.length + ciphertext.length];
             System.arraycopy(iv, 0, packed, 0, iv.length);
