@@ -130,8 +130,8 @@ def html_chinese(s):
 
 def engine_chinese(s):
     s=patch(s,
-       'String context = AgentGroup.codexContext(active, run.context, run.context.length(), Set.of()) + "\\n\\n다른 참가자가 Codex를 호출했습니다. 위 대화에 이어서 답하세요."; ',
-       'String context = AgentGroup.codexContext(active, run.context, run.context.length(), Set.of()) + "\\n\\n其他参与者呼叫了 Codex，请结合上文用简体中文继续回答。"; ',
+       'String context = AgentGroup.codexContext(active, run.context, run.context.length(), Set.of()) + "\\n\\n다른 참가자가 Codex를 호출했습니다. 위 대화에 이어서 답하세요.";',
+       'String context = AgentGroup.codexContext(active, run.context, run.context.length(), Set.of()) + "\\n\\n其他参与者呼叫了 Codex，请结合上文用简体中文继续回答。";',
        "group turn prompt")
     # Note: main ToolCatalog already requests user-language replies; strengthen for Chinese distribution.
     return s
