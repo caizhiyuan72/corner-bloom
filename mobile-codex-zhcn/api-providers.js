@@ -150,7 +150,21 @@
       e.preventDefault();const b=$('api-save');b.disabled=true;
       const params={id:editing,name:$('api-name').value.trim(),baseUrl:$('api-url').value.trim(),
         models:$('api-models').value,apiKey:$('api-key').value};
-      try{await action('providers.save',params);clear();}
+      try{
+        const saved=await call('providers.save',params);
+        const chosen=saved?.id||editing;
+        if(!chosen)throw new Error('已保存，但无法获取服务商 ID，请尝试重新打开设置。');
+        try{
+          await call('providers.select',{id:chosen});
+          await refresh();
+          status('服务商已保存并启用。现在无需登录 ChatGPT，可以新建对话使用 API。');
+          clear();
+          status('服务商已保存并启用。现在无需登录 ChatGPT，可以新建对话使用 API。');
+        }catch(startError){
+          await refresh();
+          status('服务商已保存，但启动失败：'+(startError.message||startError)+'。请检查 API 协议或在上方点击启用。',true);
+        }
+      }catch(error){status(error.message||String(error),true);}
       finally{$('api-key').value='';b.disabled=false;}
     });
     $('api-cancel').addEventListener('click',clear);
