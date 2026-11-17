@@ -156,6 +156,12 @@ def test_group(s):
         s=patch(s,a,b,"group test expected output")
     return s
 
+def test_language(s):
+    return patch(s,
+      'var context=RuntimeEnvironment.getApplication();AppLanguage.initialize(context);\n        assertEquals("Settings",Texts.t("설정"));AppLanguage.set(context,"ko");',
+      'var context=RuntimeEnvironment.getApplication();AppLanguage.initialize(context);\n        assertEquals("设置",Texts.t("설정"));AppLanguage.set(context,"ko");',
+      "default localized Chinese Android tests")
+
 def locale_chinese(s):
     return patch(s,"localStorage.getItem('language') || 'system';","localStorage.getItem('language') || 'zh-CN';","default simplified Chinese")
 
@@ -355,6 +361,7 @@ def main(root):
     edit("app/src/main/assets/web/locale.js",locale_chinese)
     edit("app/src/main/java/dev/mobilecodex/app/AppLanguage.java",app_lang_chinese)
     edit("app/src/test/java/dev/mobilecodex/app/AgentGroupTest.java",test_group)
+    edit("app/src/test/java/dev/mobilecodex/app/AppLanguageTest.java",test_language)
     edit("app/src/main/java/dev/mobilecodex/app/CharacterPacks.java",native_errors_chinese)
     edit("app/src/main/java/dev/mobilecodex/app/AgentBridge.java",bridge_errors_chinese)
     edit("app/src/main/assets/web/live.js",live_chinese)
