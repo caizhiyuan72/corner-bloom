@@ -32,6 +32,10 @@ def main(root):
       "this.context = context;\n        apiProviders = new ApiProviderStore(context);\n",
       "Engine constructor")
     s=replace_once(s,
+      'if (!accountProfiles.hasSavedLogin()) authState = "signed_out";',
+      'if (!accountProfiles.hasSavedLogin()) authState = apiProviders.isActive() ? "checking" : "signed_out";',
+      "API-only cold start must not publish a signed-out state")
+    s=replace_once(s,
       '"accounts", accountProfiles.list(), "rateLimits", rateLimits, "models", models,',
       '"accounts", accountProfiles.list(), "rateLimits", rateLimits, "models", models, "apiProviders", apiProfilesForUi(), "apiActive", apiProviders.activeId(),',
       "Engine snapshot")
@@ -46,7 +50,7 @@ def main(root):
     s=replace_once(s,
       'case "models.refresh" -> {\n                        if (!ready) start();',
       'case "providers.discover" -> { reply.complete(obj("models", apiProviders.discover(args)), null); }\n'
-      '                    case "providers.save" -> { ensureEngineIdle(); apiProviders.save(args); publish(); reply.complete(snapshot(), null); }\n'
+      '                    case "providers.save" -> { ensureEngineIdle(); String savedId = apiProviders.save(args); publish(); reply.complete(obj("id", savedId), null); }\n'
       '                    case "providers.remove" -> {\n'
       '                        ensureEngineIdle(); boolean wasActive = args.optString("id").equals(apiProviders.activeId());\n'
       '                        if (wasActive) stopCodex();\n'
@@ -131,6 +135,22 @@ def main(root):
       "selectSettingsTab('general');",
       "apiProvidersUi?.init({call, refresh:()=>call('state').then(render), toast});\n  selectSettingsTab('general');",
       "App provider UI init")
+    s=replace_once(s,
+      "function accountNeedsLogin() { return state.authState ? state.authState === 'signed_out' : !!state.ready && !C.isLoggedIn(state.account); }",
+      "function configuredApi() { return !!(state.apiActive && (state.apiProviders || []).some(p => p.id === state.apiActive && p.hasKey)); }\n  function accountNeedsLogin() { if (configuredApi()) return false; return state.authState ? state.authState === 'signed_out' : !!state.ready && !C.isLoggedIn(state.account); }",
+      "An active third-party provider suppresses ChatGPT login prompts")
+    s=replace_once(s,
+      "const logged = C.isLoggedIn(state.account), selected = state.workspace.selected;",
+      "const logged = C.isLoggedIn(state.account) || configuredApi(), selected = state.workspace.selected;",
+      "Recognize API-only login as configured")
+    s=replace_once(s,
+      "$('logout').hidden = !logged && !accountNeedsLogin();",
+      "$('logout').hidden = configuredApi() || (!logged && !accountNeedsLogin());",
+      "Custom API must not offer ChatGPT logout")
+    s=replace_once(s,
+      "async function startLogin(add = false) {\n",
+      "async function startLogin(add = false) {\n    if (!add && configuredApi()) { await call('runtime.start'); return; }\n",
+      "Start API runtime rather than ChatGPT login")
     data[appjs]=s
     s=activity.read_text()
     s=replace_once(s,
