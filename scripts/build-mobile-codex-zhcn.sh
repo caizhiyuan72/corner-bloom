@@ -20,6 +20,22 @@ assert source.count(old)==1, 'Unexpected WebView routing source'
 file.write_text(source.replace(old,new),encoding='utf-8')
 PY
 python3 "$ROOT/mobile-codex-zhcn/apply_api_providers.py" "$WORK"
+# Guard API-only authentication behavior against regressions.
+python3 - <<'PY'
+from pathlib import Path
+engine=Path('app/src/main/java/dev/mobilecodex/app/Engine.java').read_text()
+ui=Path('app/src/main/assets/web/app.js').read_text()
+store=Path('app/src/main/java/dev/mobilecodex/app/ApiProviderStore.java').read_text()
+assert 'if (!accountProfiles.hasSavedLogin() && !apiProviders.isActive())' in engine
+assert 'if (!ready && !accountProfiles.hasSavedLogin() && !apiProviders.isActive())' in engine
+assert 'account = obj("type", "api_key"); authState = "signed_in";' in engine
+assert 'if (apiProviders.isActive()) models = apiProviders.models()' in engine
+assert 'function configuredApi()' in ui
+assert "if (!add && configuredApi()) { await call('runtime.start'); return; }" in ui
+assert "await call('providers.select',{id:chosen});" in Path('app/src/main/assets/web/api-providers.js').read_text()
+assert 'builder.command().addAll(1, args);' in store
+print('Verified provider login bypass, automatic selection and runtime config paths')
+PY
 # Distinct Android package ID: debug signing keys from different CI runs cannot update one another.
 # Keep the original Chinese-only and English apps installed with their local data intact.
 python3 - <<'PY'
@@ -27,13 +43,13 @@ from pathlib import Path
 gradle=Path('app/build.gradle')
 source=gradle.read_text()
 old="applicationIdSuffix '.zhcn'"
-new="applicationIdSuffix '.zhcnscanfix'"
+new="applicationIdSuffix '.zhcnapilogin'"
 assert source.count(old)==1, 'Unexpected localized debug package ID'
 gradle.write_text(source.replace(old,new))
 manifest=Path('app/src/main/AndroidManifest.xml')
 source=manifest.read_text()
 old='android:label="Mobile Codex 中文版"'
-new='android:label="Mobile Codex 扫描修复版"'
+new='android:label="Mobile Codex API直连版"'
 assert source.count(old)==1, 'Unexpected localized app label'
 manifest.write_text(source.replace(old,new))
 PY
@@ -59,6 +75,6 @@ npm test
 ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug
 test -s app/build/outputs/apk/debug/app-debug.apk
 mkdir -p "$ROOT/apk-output"
-cp app/build/outputs/apk/debug/app-debug.apk "$ROOT/apk-output/mobile-codex-v0.3.9-zhCN-autoScan-keystoreFix-arm64-debug.apk"
+cp app/build/outputs/apk/debug/app-debug.apk "$ROOT/apk-output/mobile-codex-v0.3.9-zhCN-apiLoginFix-arm64-debug.apk"
 sha256sum "$ROOT/apk-output/"*.apk > "$ROOT/apk-output/SHA256SUMS.txt"
 echo "Build succeeded. APK is in apk-output/"
