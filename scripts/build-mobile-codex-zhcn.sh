@@ -20,6 +20,7 @@ assert source.count(old)==1, 'Unexpected WebView routing source'
 file.write_text(source.replace(old,new),encoding='utf-8')
 PY
 python3 "$ROOT/mobile-codex-zhcn/apply_api_providers.py" "$WORK"
+python3 "$ROOT/mobile-codex-zhcn/apply_zh_v2.py" "$WORK"
 # Guard API-only authentication behavior against regressions.
 python3 - <<'PY'
 from pathlib import Path
@@ -43,13 +44,13 @@ from pathlib import Path
 gradle=Path('app/build.gradle')
 source=gradle.read_text()
 old="applicationIdSuffix '.zhcn'"
-new="applicationIdSuffix '.zhcnapilogin'"
+new="applicationIdSuffix '.zhcnv2'"
 assert source.count(old)==1, 'Unexpected localized debug package ID'
 gradle.write_text(source.replace(old,new))
 manifest=Path('app/src/main/AndroidManifest.xml')
 source=manifest.read_text()
 old='android:label="Mobile Codex 中文版"'
-new='android:label="Mobile Codex API直连版"'
+new='android:label="Mobile Codex 中文增强版"'
 assert source.count(old)==1, 'Unexpected localized app label'
 manifest.write_text(source.replace(old,new))
 PY
@@ -75,6 +76,6 @@ npm test
 ./gradlew --no-daemon assembleDebug testDebugUnitTest lintDebug
 test -s app/build/outputs/apk/debug/app-debug.apk
 mkdir -p "$ROOT/apk-output"
-cp app/build/outputs/apk/debug/app-debug.apk "$ROOT/apk-output/mobile-codex-v0.3.9-zhCN-apiLoginFix-arm64-debug.apk"
+cp app/build/outputs/apk/debug/app-debug.apk "$ROOT/apk-output/mobile-codex-v0.3.9-zhCN-v2-arm64-debug.apk"
 sha256sum "$ROOT/apk-output/"*.apk > "$ROOT/apk-output/SHA256SUMS.txt"
 echo "Build succeeded. APK is in apk-output/"
