@@ -280,6 +280,21 @@ def main(root):
     original=engine_test.read_text("utf-8")
     original=original.replace('[그룹 대화]', '[群组对话]').replace('[사용자]', '[用户]')
     engine_test.write_text(original,encoding="utf-8")
+    # The old icon hints contained Korean tag IDs; the Chinese edition uses a
+    # text-only guidance prompt instead. Assert the localized behavior.
+    original=engine_test.read_text("utf-8")
+    original=original.replace('assertTrue(launch("claude").getString("prompt").contains("[[icon:태그명]]"));',
+        'assertTrue(launch("claude").getString("prompt").contains("聊天图标说明"));')
+    engine_test.write_text(original,encoding="utf-8")
+    offline=p/"app/src/test/java/dev/mobilecodex/app/EngineOfflineSessionTest.java"
+    text=offline.read_text("utf-8")
+    text=text.replace('assertTrue(started.getString("developerInstructions").contains("[[icon:태그명]]"));',
+        'assertTrue(started.getString("developerInstructions").contains("聊天图标说明"));')
+    text=text.replace('assertTrue(started.getString("developerInstructions").contains("검토완료"));',
+        'assertTrue(started.getString("developerInstructions").contains("简体中文"));')
+    text=text.replace('assertTrue(enabled.getString("developerInstructions").contains("[[icon:태그명]]"));',
+        'assertTrue(enabled.getString("developerInstructions").contains("聊天图标说明"));')
+    offline.write_text(text,encoding="utf-8")
 
     # Add missing Korean->Chinese dynamic UI messages to both native and WebView catalogs.
     file=p/"app/src/main/assets/translations-zh-CN.json"
