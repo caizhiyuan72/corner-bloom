@@ -446,6 +446,23 @@ def room_chinese(s):
     return s
 
 
+
+TEST_ROOM_MATCHES = {
+  "/자동 검토/": "/自动审批/",
+  "/마지막 연결 상태/": "/上次连接信息/",
+  "/CLI가 종료/": "/CLI 已退出/",
+  "/진행 중인 설치 또는 로그인이 없습니다/": "/没有正在执行的安装或登录操作/",
+  "/에이전트를 선택/": "/请选择智能体/",
+  "/실행 ID/": "/运行 ID/",
+  "/지원하지 않는 에이전트/": "/不支持该智能体/",
+  "/지원하지 않는/": "/不支持/"
+}
+
+def room_test_chinese(s):
+    for a,b in TEST_ROOM_MATCHES.items():
+        if a in s: s=s.replace(a,b)
+    return s
+
 def main(root):
     p=Path(root)
     def edit(relative,fn): rewrite(p/relative,fn)
@@ -473,7 +490,7 @@ def main(root):
         edit(asset,room_chinese)
     for test in (p/"tests").glob("*.test.cjs"):
         before=test.read_text("utf-8")
-        after=room_chinese(before)
+        after=room_test_chinese(room_chinese(before))
         if before!=after: test.write_text(after,encoding="utf-8")
     live_test=p/"tests/live-voices.test.cjs"
     original=live_test.read_text("utf-8")
