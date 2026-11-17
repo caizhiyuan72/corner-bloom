@@ -177,6 +177,17 @@ def test_voices(s):
         s=s.replace(a,b)
     return s
 
+def test_model_ui(s):
+    s=patch(s,
+      "assert.equal(d.getElementById('effort-heading').textContent,'Ultra');",
+      "assert.equal(d.getElementById('effort-heading').textContent,'极限');",
+      "Chinese Ultra model label")
+    s=patch(s,
+      "assert.equal(d.getElementById('effort-heading').textContent,'Medium');",
+      "assert.equal(d.getElementById('effort-heading').textContent,'中');",
+      "Chinese Medium model label")
+    return s
+
 def locale_chinese(s):
     return patch(s,"localStorage.getItem('language') || 'system';","localStorage.getItem('language') || 'zh-CN';","default simplified Chinese")
 
@@ -381,6 +392,7 @@ def main(root):
     edit("app/src/main/java/dev/mobilecodex/app/AgentBridge.java",bridge_errors_chinese)
     edit("app/src/main/assets/web/live.js",live_chinese)
     edit("tests/live-voices.test.cjs",test_voices)
+    edit("tests/ui.test.cjs",test_model_ui)
     live_test=p/"tests/live-voices.test.cjs"
     original=live_test.read_text("utf-8")
     for old,new in [("'한국어'","'韩语'"),("'미국 영어'","'美式英语'"),
