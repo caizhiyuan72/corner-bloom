@@ -16,6 +16,7 @@ import android.view.accessibility.AccessibilityManager;
 
 /** Short tap replay and opt-in editor delete keys. No touch exploration. */
 public final class TapAccessibilityService extends AccessibilityService {
+    private static final long TAP_DURATION_MS=48;
     private static volatile TapAccessibilityService current;
     private static Runnable stateListener;
     private static String lastTap="最近补点：尚未触发";
@@ -97,11 +98,11 @@ public final class TapAccessibilityService extends AccessibilityService {
     static boolean tap(float x,float y,Runnable finished){
         TapAccessibilityService service=current;if(service==null||!service.ready){lastTap="最近补点：服务未就绪";return false;}
         Path path=new Path();path.moveTo(x,y);
-        GestureDescription gesture=new GestureDescription.Builder().addStroke(new GestureDescription.StrokeDescription(path,0,24)).build();
+        GestureDescription gesture=new GestureDescription.Builder().addStroke(new GestureDescription.StrokeDescription(path,0,TAP_DURATION_MS)).build();
         lastTap="最近补点：已请求";
         boolean accepted=service.dispatchGesture(gesture,new GestureResultCallback(){
             @Override public void onCompleted(GestureDescription gesture){lastTap="最近补点：系统已完成手势";finished.run();}
-            @Override public void onCancelled(GestureDescription gesture){lastTap="最近补点：被系统取消";finished.run();}
+            @Override public void onCancelled(GestureDescription gesture){lastTap="最近补点：被系统取消，请再轻点一次";finished.run();}
         },null);
         if(!accepted)lastTap="最近补点：系统未接受请求";
         return accepted;

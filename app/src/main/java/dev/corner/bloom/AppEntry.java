@@ -4,6 +4,7 @@ import android.content.*;
 import android.content.pm.*;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import java.util.*;
 
 final class AppEntry {
@@ -32,8 +33,26 @@ final class AppEntry {
         out.sort((a,b)->collator.compare(a.name,b.name));
         return out;
     }
+    static BroadcastReceiver watchPackages(Context context, Runnable onChanged) {
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_PACKAGE_ADDED);
+        filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+        filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
+        filter.addDataScheme("package");
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context context, Intent intent) {
+                // An update sends REMOVED followed by ADDED. Reload after the new APK is ready.
+                if (Intent.ACTION_PACKAGE_REMOVED.equals(intent.getAction())
+                        && intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return;
+                onChanged.run();
+            }
+        };
+        if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        else context.registerReceiver(receiver, filter);
+        return receiver;
+    }
     static List<AppEntry> favorites(List<AppEntry> all,Prefs p){
-        if(!p.hasSelection()){
+        if(!p.hasSelection()&&!all.isEmpty()){
             List<String> initial=new ArrayList<>();
             for(int i=0;i<Math.min(12,all.size());i++)initial.add(all.get(i).id());
             p.selected(initial);

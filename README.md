@@ -2,9 +2,11 @@
 
 一个面向安卓单手操作的角落应用启动器。从角落上滑展开常用应用，滑到图标后松手打开。
 
-**1.0.0 · 首个正式版本**　Android 8.0+ · 原生 Java + Canvas · 无需 Root
+**1.0.2**　Android 8.0+ · 原生 Java + Canvas · 无需 Root
 
-[下载安装包](https://github.com/caizhiyuan72/corner-bloom/raw/refs/heads/main/downloads/corner-bloom-1.0.0.apk) · [SHA-256 校验](downloads/SHA256SUMS)
+[下载安装包](https://github.com/caizhiyuan72/corner-bloom/raw/refs/heads/main/downloads/corner-bloom-1.0.2.apk) · [SHA-256 校验](downloads/SHA256SUMS)
+
+1.0.2（内部版本 22）会在应用安装、更新或卸载后自动刷新后台入口的常用应用，修复位置预览与实际展开数量不一致的问题。新包沿用原签名，可覆盖安装并保留设置。轻点穿透改动见 [1.0.1 修复说明](docs/RELEASE-1.0.1.md)。
 
 ## 功能
 
@@ -32,7 +34,7 @@
 相关选项位于「显示与穿透」，默认关闭，需要手动开启系统无障碍服务。
 
 - **通过无障碍显示入口**：使用无障碍窗口显示入口，无需普通悬浮窗权限。可尝试用于系统将“正在其他应用的上层显示内容”通知开关锁灰的情况；具体提醒行为取决于系统。服务断开时暂停入口，恢复连接后重建。
-- **轻点穿透**：在松手后向入口下方同一坐标补一次点击，会有少量延迟。
+- **轻点穿透**：在松手后向入口下方最初按下的位置补一次点击，会有少量延迟。小幅松手偏移不会改变目标；按压时长遵循系统长按阈值，真正的长按不作为轻点转发。
 - **按住删除键连续删**：需要 Android 13+。先开启「轻点穿透」，再开启此选项并「标记键盘删除键」。在入口覆盖已标记删除键的位置按住，连续删字，松手停止继续发送删除。
 
 长按辅助针对底部固定文字键盘与已标记的删除键，不是通用长按转发。更换键盘布局、高度、屏幕缩放或方向后需重新标记。数字/电话输入框、悬浮键盘、自定义编辑器及输入法组合输入的支持情况可能不同。
@@ -64,7 +66,7 @@ export ANDROID_SDK_ROOT=/path/to/android-sdk
 bash tools/build.sh
 ```
 
-输出：`app/build/manual/corner-bloom-1.0.0.apk`。
+输出：`app/build/manual/corner-bloom-1.0.2.apk`。
 
 只有 JRE 时可设置 `BLOOM_ECJ_JAR=/path/to/ecj.jar`；也可通过 `BLOOM_ANDROID_JAR` 和 `BLOOM_BUILD_TOOLS` 指定 SDK 文件位置。
 

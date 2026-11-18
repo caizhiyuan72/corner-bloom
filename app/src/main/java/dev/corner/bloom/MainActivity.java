@@ -28,6 +28,8 @@ public final class MainActivity extends Activity {
     private PageHost.Page settingsPage,positionPage;
     private android.window.OnBackInvokedCallback backCallback;
     private boolean ready;
+    private BroadcastReceiver packageReceiver;
+    private int appLoadGeneration;
     private final Handler ui=new Handler(Looper.getMainLooper());
     private EditText holdTest;
     private View calibration;
@@ -50,9 +52,23 @@ public final class MainActivity extends Activity {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,backCallback);
         }
         applyRecentsPreference();
-        worker.execute(()->{
-            List<AppEntry> loaded=AppEntry.load(this);
-            runOnUiThread(()->{if(isDestroyed())return;all=loaded;ready=true;refreshApps();refreshStatus();});
+    }
+    @Override protected void onStart() {
+        super.onStart();
+        packageReceiver = AppEntry.watchPackages(this, this::loadApps);
+        loadApps();
+    }
+    private void loadApps() {
+        int request = ++appLoadGeneration;
+        worker.execute(() -> {
+            List<AppEntry> loaded = AppEntry.load(this);
+            runOnUiThread(() -> {
+                if (isDestroyed() || request != appLoadGeneration) return;
+                all = loaded;
+                ready = true;
+                refreshApps();
+                refreshStatus();
+            });
         });
     }
     private GradientDrawable background(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
@@ -110,7 +126,7 @@ public final class MainActivity extends Activity {
         divider(services);
         navigationRow(services,"后台与启动","开机启动与最近任务",this::showBackgroundSettings);
         gap(content,5);
-        TextView version=text("角落绽放  1.0.0",12,MUTED);version.setGravity(Gravity.CENTER);
+        TextView version=text("角落绽放  1.0.2",12,MUTED);version.setGravity(Gravity.CENTER);
         content.addView(version);
         pages=new PageHost(this,BG);applyInsets(pages);pages.setRoot(scroll);setContentView(pages);
     }
@@ -477,8 +493,9 @@ public final class MainActivity extends Activity {
         TextView hint=text("按添加顺序排列，点已选应用可移除。",12,MUTED);body.addView(hint);
         EditText search=new EditText(this);search.setSingleLine();search.setTextColor(INK);search.setHintTextColor(MUTED);search.setHint("搜索应用");body.addView(search);
         ListView list=new ListView(this);list.setDividerHeight(0);body.addView(list,new LinearLayout.LayoutParams(-1,dp(330)));
-        List<AppEntry> shown=new ArrayList<>(all);
-        List<String> names=new ArrayList<>();for(AppEntry a:all)names.add(a.name.toLowerCase(Locale.ROOT));
+        List<AppEntry> available=all;
+        List<AppEntry> shown=new ArrayList<>(available);
+        List<String> names=new ArrayList<>();for(AppEntry a:available)names.add(a.name.toLowerCase(Locale.ROOT));
         android.widget.BaseAdapter adapter=new android.widget.BaseAdapter(){
             public int getCount(){return shown.size();}public Object getItem(int p){return shown.get(p);}public long getItemId(int p){return p;}
             public View getView(int p,View old,android.view.ViewGroup parent){
@@ -504,7 +521,7 @@ public final class MainActivity extends Activity {
             private String query="";
             public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int before,int n){
                 String q=s.toString().toLowerCase(Locale.ROOT);if(q.equals(query))return;query=q;
-                shown.clear();for(int i=0;i<all.size();i++)if(names.get(i).contains(q))shown.add(all.get(i));adapter.notifyDataSetChanged();
+                shown.clear();for(int i=0;i<available.size();i++)if(names.get(i).contains(q))shown.add(available.get(i));adapter.notifyDataSetChanged();
             }public void afterTextChanged(Editable e){}
         });
         AlertDialog dialog=new AlertDialog.Builder(this).setTitle("选择常用应用").setView(body).setNegativeButton("取消",null)
@@ -539,6 +556,12 @@ public final class MainActivity extends Activity {
         foreground=false;ui.removeCallbacks(refreshRuntime);
         if(positionPage!=null)positionPage.closeImmediately();if(pages!=null)pages.finishTransition();
         cancelCalibration();if(prefs!=null)applyRecentsPreference();super.onPause();
+    }
+    @Override protected void onStop() {
+        unregisterReceiver(packageReceiver);
+        packageReceiver = null;
+        appLoadGeneration++;
+        super.onStop();
     }
     @Override protected void onDestroy(){
         ui.removeCallbacksAndMessages(null);if(pickerDialog!=null)pickerDialog.dismiss();

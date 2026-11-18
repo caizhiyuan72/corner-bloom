@@ -15,37 +15,78 @@ shutil.rmtree(work, ignore_errors=True)
 sources = {
 "android/content/Context.java": """
 package android.content;
-import android.app.*;import android.os.*;import android.view.*;import android.content.res.*;
+import android.app.*;import android.os.*;import android.view.*;import android.content.res.*;import android.content.pm.*;import java.util.*;
 public class Context {
  public static final int MODE_PRIVATE=0,RECEIVER_NOT_EXPORTED=4;
  public static final String WINDOW_SERVICE="window",POWER_SERVICE="power",KEYGUARD_SERVICE="keyguard",NOTIFICATION_SERVICE="notification";
  public final WindowManager windows=new WindowManager();public final PowerManager power=new PowerManager();
  public final KeyguardManager keyguard=new KeyguardManager();public final NotificationManager notifications=new NotificationManager();
  public final SharedPreferences preferences=new SharedPreferences();
+ public final PackageManager packages=new PackageManager();
+ private final Map<BroadcastReceiver,IntentFilter> receivers=new HashMap<>();
  public Object getSystemService(String s){if(s.equals(WINDOW_SERVICE))return windows;if(s.equals(POWER_SERVICE))return power;if(s.equals(KEYGUARD_SERVICE))return keyguard;return notifications;}
  public SharedPreferences getSharedPreferences(String s,int m){return preferences;}
  public Resources getResources(){return new Resources();}
- public void registerReceiver(BroadcastReceiver r,IntentFilter f){}public void registerReceiver(BroadcastReceiver r,IntentFilter f,int flags){}
- public void unregisterReceiver(BroadcastReceiver r){}public void startActivity(Intent i){}
+ public PackageManager getPackageManager(){return packages;}public String getPackageName(){return "dev.corner.bloom";}
+ public void registerReceiver(BroadcastReceiver r,IntentFilter f){receivers.put(r,f);}
+ public void registerReceiver(BroadcastReceiver r,IntentFilter f,int flags){registerReceiver(r,f);}
+ public void unregisterReceiver(BroadcastReceiver r){receivers.remove(r);}public void startActivity(Intent i){}
+ public void sendPackageEvent(String action,boolean replacing){
+  for(Map.Entry<BroadcastReceiver,IntentFilter> entry:receivers.entrySet()){
+   IntentFilter filter=entry.getValue();
+   if(filter.actions.contains(action)&&"package".equals(filter.scheme))entry.getKey().onReceive(this,new Intent(action).setReplacing(replacing));
+  }
+ }
 }
 """,
 "android/content/SharedPreferences.java": """
 package android.content;public class SharedPreferences {
  public interface OnSharedPreferenceChangeListener {void onSharedPreferenceChanged(SharedPreferences p,String key);}
- public void registerOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener l){}
- public void unregisterOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener l){}
+ private OnSharedPreferenceChangeListener listener;
+ public void registerOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener l){listener=l;}
+ public void unregisterOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener l){if(listener==l)listener=null;}
+ public void notifyChanged(String key){if(listener!=null)listener.onSharedPreferenceChanged(this,key);}
 }
 """,
 "android/content/Intent.java": """
 package android.content;public class Intent {
  public static final String ACTION_SCREEN_OFF="off",ACTION_SCREEN_ON="on",ACTION_USER_PRESENT="present",ACTION_MAIN="main",CATEGORY_LAUNCHER="launcher";
+ public static final String ACTION_PACKAGE_ADDED="added",ACTION_PACKAGE_REMOVED="removed",ACTION_PACKAGE_CHANGED="changed",EXTRA_REPLACING="replacing";
  public static final int FLAG_ACTIVITY_NEW_TASK=1,FLAG_ACTIVITY_RESET_TASK_IF_NEEDED=2;private String action;
+ private boolean replacing;
  public Intent(){}public Intent(String a){action=a;}public Intent(Context c,Class<?> t){}
  public Intent setAction(String a){action=a;return this;}public String getAction(){return action;}
+ public Intent setReplacing(boolean value){replacing=value;return this;}public boolean getBooleanExtra(String key,boolean fallback){return replacing;}
  public Intent addCategory(String s){return this;}public Intent setComponent(Object o){return this;}public Intent addFlags(int flags){return this;}
 }
 """,
-"android/content/IntentFilter.java": "package android.content;public class IntentFilter {public void addAction(String s){}}",
+"android/content/IntentFilter.java": """
+package android.content;import java.util.*;public class IntentFilter {
+ final Set<String> actions=new HashSet<>();String scheme;public void addAction(String s){actions.add(s);}
+ public void addDataScheme(String value){scheme=value;}
+}
+""",
+"android/content/ComponentName.java": """
+package android.content;public class ComponentName {
+ private final String id;public ComponentName(String pkg,String name){id=pkg+"/"+name;}public String flattenToString(){return id;}
+}
+""",
+"android/content/pm/PackageManager.java": """
+package android.content.pm;import android.content.*;import java.util.*;
+public class PackageManager {
+ public List<ResolveInfo> installed=new ArrayList<>();public int queries;
+ public List<ResolveInfo> queryIntentActivities(Intent intent,int flags){queries++;return new ArrayList<>(installed);}
+}
+""",
+"android/content/pm/ActivityInfo.java": "package android.content.pm;public class ActivityInfo {public String packageName,name;}",
+"android/content/pm/ResolveInfo.java": """
+package android.content.pm;import android.graphics.drawable.Drawable;
+public class ResolveInfo {
+ public final ActivityInfo activityInfo=new ActivityInfo();private final String label;
+ public ResolveInfo(String pkg,String name,String label){activityInfo.packageName=pkg;activityInfo.name=name;this.label=label;}
+ public Drawable loadIcon(PackageManager pm){return new Drawable();}public CharSequence loadLabel(PackageManager pm){return label;}
+}
+""",
 "android/content/BroadcastReceiver.java": "package android.content;public abstract class BroadcastReceiver {public abstract void onReceive(Context c,Intent i);}",
 "android/content/res/Configuration.java": "package android.content.res;public class Configuration {}",
 "android/content/res/Resources.java": "package android.content.res;public class Resources {public android.util.DisplayMetrics getDisplayMetrics(){return new android.util.DisplayMetrics();}}",
@@ -97,21 +138,24 @@ package android.os;import java.util.*;public class Handler {
 "android/graphics/RectF.java": "package android.graphics;public class RectF {public float left,top,right,bottom;public RectF(float l,float t,float r,float b){left=l;top=t;right=r;bottom=b;}public float width(){return right-left;}public float height(){return bottom-top;}}",
 "android/graphics/Rect.java": "package android.graphics;public class Rect {public int bottom=2400;public Rect(){}public Rect(int a,int b,int c,int d){}}",
 "android/graphics/PixelFormat.java": "package android.graphics;public class PixelFormat {public static final int TRANSLUCENT=1;}",
+"android/graphics/Bitmap.java": "package android.graphics;public class Bitmap {}",
+"android/graphics/drawable/Drawable.java": "package android.graphics.drawable;public class Drawable {}",
 "android/view/View.java": """
 package android.view;import android.content.*;import java.util.*;public class View {
- public static final int VISIBLE=0,GONE=8;public boolean attached;private int visibility;private float alpha=1;public OnTouchListener listener;
+ public static final int VISIBLE=0,GONE=8;public static int frameDelay=16;public static boolean omitFrames;public int inputFlags;public boolean attached;private int visibility;private float alpha=1;public OnTouchListener listener;
  public View(Context c){}public interface OnTouchListener {boolean onTouch(View v,MotionEvent e);}
  public void setOnTouchListener(OnTouchListener l){listener=l;}public boolean isAttachedToWindow(){return attached;}
  public int getVisibility(){return visibility;}public void setVisibility(int v){visibility=v;}
  public float getAlpha(){return alpha;}public void setAlpha(float a){alpha=a;}
+ public void postOnAnimation(Runnable r){if(!omitFrames)new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(r,frameDelay);}
  public void invalidate(){}public void setSystemGestureExclusionRects(List<android.graphics.Rect> r){}
 }
 """,
 "android/view/MotionEvent.java": """
 package android.view;public class MotionEvent {
  public static final int ACTION_DOWN=0,ACTION_UP=1,ACTION_MOVE=2,ACTION_CANCEL=3,ACTION_POINTER_DOWN=5;
- private int action;private long time;public MotionEvent(int a,long t){action=a;time=t;}
- public int getActionMasked(){return action;}public float getRawX(){return 1075;}public float getRawY(){return 2320;}
+ private int action;private long time;private float x,y;public MotionEvent(int a,long t){this(a,t,1075,2320);}public MotionEvent(int a,long t,float x,float y){action=a;time=t;this.x=x;this.y=y;}
+ public int getActionMasked(){return action;}public float getRawX(){return x;}public float getRawY(){return y;}
  public int getHistorySize(){return 0;}public float getHistoricalX(int h){return 0;}public float getHistoricalY(int h){return 0;}
  public float getX(){return getRawX();}public float getY(){return getRawY();}public long getEventTime(){return time;}
 }
@@ -126,9 +170,9 @@ package android.view;import java.util.*;public class WindowManager {
  public final List<View> attached=new ArrayList<>();public int adds,removes,updates,failAdds,failUpdates,failOnAdd;
  public Object token=new Object();
  public Display getDefaultDisplay(){return new Display();}public WindowMetrics getCurrentWindowMetrics(){return new WindowMetrics();}
- public void addView(View v,LayoutParams p){adds++;if(failAdds-->0||adds==failOnAdd)throw new IllegalStateException("add failed");if(v.attached)throw new IllegalStateException("duplicate");if(p.token==null)p.token=token;if(p.token!=token)throw new IllegalStateException("stale connection token");attached.add(v);v.attached=true;}
+ public void addView(View v,LayoutParams p){adds++;if(failAdds-->0||adds==failOnAdd)throw new IllegalStateException("add failed");if(v.attached)throw new IllegalStateException("duplicate");if(p.token==null)p.token=token;if(p.token!=token)throw new IllegalStateException("stale connection token");attached.add(v);v.attached=true;v.inputFlags=p.flags;}
  public void removeViewImmediate(View v){removes++;attached.remove(v);v.attached=false;}
- public void updateViewLayout(View v,LayoutParams p){updates++;if(failUpdates-->0||!v.attached)throw new IllegalArgumentException("lost root");}
+ public void updateViewLayout(View v,LayoutParams p){updates++;if(failUpdates-->0||!v.attached)throw new IllegalArgumentException("lost root");final int flags=p.flags;new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(()->v.inputFlags=flags,View.frameDelay);}
  public static class LayoutParams {
   public static final int TYPE_APPLICATION_OVERLAY=2038,TYPE_ACCESSIBILITY_OVERLAY=2032,FLAG_NOT_FOCUSABLE=1,FLAG_NOT_TOUCHABLE=2,FLAG_ALT_FOCUSABLE_IM=4,FLAG_NOT_TOUCH_MODAL=8,FLAG_LAYOUT_IN_SCREEN=16,SOFT_INPUT_ADJUST_NOTHING=32,LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES=1;
   public int type,flags,x,y,width,height,gravity,windowAnimations,softInputMode,layoutInDisplayCutoutMode;public float alpha=1;public Object token;
@@ -145,15 +189,19 @@ package dev.corner.bloom;import android.content.*;import java.util.*;final class
  public static final Map<String,Object> data=new HashMap<>();Prefs(Context c){}
  boolean get(String k,boolean f){return (boolean)data.getOrDefault(k,f);}int get(String k,int f){return (int)data.getOrDefault(k,f);}
  void set(String k,boolean v){data.put(k,v);}void migrateInputV3(){}void recoverTapMode(){}
+ boolean hasSelection(){return data.containsKey("apps");}
+ @SuppressWarnings("unchecked") List<String> selected(){return (List<String>)data.getOrDefault("apps",Collections.emptyList());}
+ void selected(List<String> ids){data.put("apps",new ArrayList<>(ids));}
 }
 """,
-"dev/corner/bloom/AppEntry.java": "package dev.corner.bloom;import android.content.*;import java.util.*;final class AppEntry {Object component;static List<AppEntry> load(Context c){return new ArrayList<>();}static List<AppEntry> favorites(List<AppEntry> a,Prefs p){return a;}}",
+"dev/corner/bloom/RoundedIcons.java": "package dev.corner.bloom;import android.graphics.*;import android.graphics.drawable.*;final class RoundedIcons {static Bitmap create(Drawable d,int s){return new Bitmap();}}",
 "dev/corner/bloom/BloomView.java": """
 package dev.corner.bloom;import android.content.*;import android.view.*;import android.graphics.*;import java.util.*;
 final class BloomView extends View {
  interface Host {void expand();void collapse();void launch(AppEntry e);}boolean busy;int resets;
+ List<AppEntry> apps=Collections.emptyList();
  BloomView(Context c,Prefs p,boolean o,Host h){super(c);}void reset(){busy=false;resets++;}
- void setApps(List<AppEntry> a){}void overlayBounds(int w,int h,RectF r){}
+ void setApps(List<AppEntry> a){apps=a;}void overlayBounds(int w,int h,RectF r){}
  boolean interactionActive(){return busy;}boolean gestureActive(){return false;}void cancelGesture(){busy=false;}
  boolean onTouchEvent(MotionEvent e){busy=e.getActionMasked()!=MotionEvent.ACTION_UP&&e.getActionMasked()!=MotionEvent.ACTION_CANCEL;return true;}
 }
@@ -161,15 +209,21 @@ final class BloomView extends View {
 "dev/corner/bloom/CornerHandleView.java": "package dev.corner.bloom;import android.content.*;import android.view.*;final class CornerHandleView extends View {CornerHandleView(Context c,Prefs p){super(c);}}",
 "dev/corner/bloom/TapAccessibilityService.java": """
 package dev.corner.bloom;import android.os.*;import android.view.*;final class TapAccessibilityService {
- static boolean connected=true;static WindowManager windows=new WindowManager();static Runnable listener;
+ static boolean connected=true,cancelNext,omitCallback;static int attempts,clicks,rejects,swallowed;static float lastX,lastY;static long submittedAt;static View probe;static WindowManager windows=new WindowManager();static Runnable listener;
  static boolean available(){return connected;}static WindowManager overlayWindowManager(){return connected?windows:null;}
  static void setStateListener(Runnable r){listener=r;}static DeleteHold.Source captureDelete(){return null;}
- static void deleteStatus(String s){}static boolean tap(float x,float y,Runnable done){new Handler(Looper.getMainLooper()).postDelayed(done,24);return true;}
+ static void deleteStatus(String s){}static boolean tap(float x,float y,Runnable done){
+  attempts++;lastX=x;lastY=y;submittedAt=Handler.now;if(rejects>0){rejects--;return false;}
+  boolean blocked=probe!=null&&(probe.inputFlags&WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)==0;
+  if(blocked)swallowed++;boolean cancelled=cancelNext;cancelNext=false;
+  if(!omitCallback)new Handler(Looper.getMainLooper()).postDelayed(()->{if(!blocked&&!cancelled)clicks++;done.run();},48);
+  return true;
+ }
 }
 """,
 "dev/corner/bloom/OverlayServiceProtocolTest.java": """
 package dev.corner.bloom;
-import android.app.*;import android.content.*;import android.os.*;import android.provider.*;import android.view.*;import java.lang.reflect.*;
+import android.app.*;import android.content.*;import android.content.pm.*;import android.os.*;import android.provider.*;import android.view.*;import java.lang.reflect.*;import java.util.*;import java.util.concurrent.*;
 public final class OverlayServiceProtocolTest {
  static void check(boolean v,String s){if(!v)throw new AssertionError(s);}
  static Object field(Object o,String n)throws Exception{Field f=OverlayService.class.getDeclaredField(n);f.setAccessible(true);return f.get(o);}
@@ -177,6 +231,52 @@ public final class OverlayServiceProtocolTest {
  static void screen(OverlayService s,String action)throws Exception{((BroadcastReceiver)field(s,"screen")).onReceive(s,new Intent(action));}
  static OverlayService start()throws Exception{OverlayService s=new OverlayService();s.onCreate();check(s.onStartCommand(new Intent(),0,1)==Service.START_STICKY,"request normal sticky recovery");return s;}
  static void touch(OverlayService s,int a,long t)throws Exception{View h=(View)field(s,"handle");h.listener.onTouch(h,new MotionEvent(a,t));}
+ static void finishAppLoads(OverlayService s)throws Exception{
+  ((ExecutorService)field(s,"loader")).submit(()->{}).get(2,TimeUnit.SECONDS);Handler.advance(0);
+ }
+ static void appUpdates()throws Exception {
+  OverlayService service=new OverlayService();Prefs prefs=new Prefs(service);
+  List<String> selected=new ArrayList<>();
+  for(int i=0;i<11;i++){
+   String pkg="example.app"+i;
+   service.packages.installed.add(new ResolveInfo(pkg,"Main","App "+i));selected.add(pkg+"/Main");
+  }
+  String dragon="dev.mobilecodex.app.zhcnv3";
+  selected.add(5,dragon+"/Main");prefs.selected(selected);
+  service.onCreate();service.onStartCommand(new Intent(),0,1);finishAppLoads(service);
+  BloomView view=(BloomView)field(service,"view");
+  check(view.apps.size()==11,"service starts with 11 available favorites");
+
+  touch(service,MotionEvent.ACTION_DOWN,10);
+  service.packages.installed.add(new ResolveInfo(dragon,"Main","大肥龙"));
+  service.sendPackageEvent(Intent.ACTION_PACKAGE_ADDED,false);finishAppLoads(service);
+  check(AppEntry.favorites(AppEntry.load(service),prefs).size()==12,"fresh settings preview sees all 12");
+  check(view.apps.size()==11,"an in-flight gesture retains its original app positions");
+  touch(service,MotionEvent.ACTION_UP,100);touch(service,MotionEvent.ACTION_DOWN,200);
+  check(view.apps.size()==12&&view.apps.get(5).id().equals(dragon+"/Main"),"next gesture shows the new app in its saved slot");
+  touch(service,MotionEvent.ACTION_UP,300);
+
+  int queries=service.packages.queries;
+  service.sendPackageEvent(Intent.ACTION_PACKAGE_REMOVED,true);finishAppLoads(service);
+  check(service.packages.queries==queries,"replacement removal does not drop or reload favorites");
+  service.packages.installed.set(11,new ResolveInfo(dragon,"Main","大肥龙新版"));
+  service.sendPackageEvent(Intent.ACTION_PACKAGE_ADDED,true);finishAppLoads(service);
+  check(view.apps.size()==12&&view.apps.get(5).name.equals("大肥龙新版"),"update refreshes the selected app in place");
+
+  service.packages.installed.remove(11);
+  service.sendPackageEvent(Intent.ACTION_PACKAGE_REMOVED,false);finishAppLoads(service);
+  check(view.apps.size()==11&&prefs.selected().equals(selected),"uninstall hides unavailable app and retains the saved order");
+  service.packages.installed.add(new ResolveInfo(dragon,"Main","大肥龙"));
+  service.onStartCommand(new Intent(OverlayService.RESTORE),0,2);finishAppLoads(service);
+  check(view.apps.size()==12&&view.apps.get(5).id().equals(dragon+"/Main"),"manual restore refreshes a running service");
+
+  String newApp="example.newcomer";
+  service.packages.installed.add(new ResolveInfo(newApp,"Main","New app"));
+  selected.set(5,newApp+"/Main");prefs.selected(selected);service.preferences.notifyChanged("apps");
+  finishAppLoads(service);
+  check(view.apps.size()==12&&view.apps.get(5).id().equals(newApp+"/Main"),"saving a newly selected app also recovers a stale catalog");
+  service.onDestroy();service.sendPackageEvent(Intent.ACTION_PACKAGE_CHANGED,false);
+ }
  public static void main(String[] args)throws Exception{
   Prefs.data.clear();OverlayService s=start();
   check(s.windows.attached.size()==2&&OverlayService.running,"initial pair attached");
@@ -268,11 +368,49 @@ public final class OverlayServiceProtocolTest {
   WindowManager.LayoutParams placed=(WindowManager.LayoutParams)field(editing,"handleParams");
   check(placed.x==994&&placed.y==2187,"saved editor position uses the same real screen coordinates");
   editing.onDestroy();
+  // Regressions for keyboard keys near a fixed handle (not an IME emulator).
+  Prefs.data.clear();Prefs.data.put("tap_through",true);View.frameDelay=80;
+  OverlayService keyboard=start();View kh=(View)field(keyboard,"handle");TapAccessibilityService.probe=kh;
+  Handler.advance(80);int attempts=TapAccessibilityService.attempts,clicks=TapAccessibilityService.clicks;
+  long started=Handler.now;
+  kh.listener.onTouch(kh,new MotionEvent(MotionEvent.ACTION_DOWN,1000,1075,2320));
+  kh.listener.onTouch(kh,new MotionEvent(MotionEvent.ACTION_UP,1400,1080,2323));
+  Handler.advance(40);
+  check(TapAccessibilityService.attempts==attempts,"never inject on a timer before a delayed window traversal");
+  Handler.advance(180);
+  check(TapAccessibilityService.attempts==attempts+1&&TapAccessibilityService.clicks==clicks+1&&TapAccessibilityService.swallowed==0,"400ms press yields exactly one delivered replay after frames");
+  check(TapAccessibilityService.lastX==1075&&TapAccessibilityService.lastY==2320,"key target stays at DOWN despite release drift");
+  check(TapAccessibilityService.submittedAt-started>=160,"wait across both delayed frame boundaries");
+  Handler.advance(80);View.frameDelay=16;
+  attempts=TapAccessibilityService.attempts;clicks=TapAccessibilityService.clicks;TapAccessibilityService.rejects=1;
+  touch(keyboard,MotionEvent.ACTION_DOWN,2000);touch(keyboard,MotionEvent.ACTION_UP,2050);Handler.advance(160);
+  check(TapAccessibilityService.attempts==attempts+2&&TapAccessibilityService.clicks==clicks+1,"retry one explicitly rejected request exactly once");
+  attempts=TapAccessibilityService.attempts;TapAccessibilityService.rejects=10;
+  touch(keyboard,MotionEvent.ACTION_DOWN,2200);touch(keyboard,MotionEvent.ACTION_UP,2250);Handler.advance(900);
+  check(TapAccessibilityService.attempts==attempts+2&&!(boolean)field(keyboard,"replaying"),"permanent rejection is bounded and restores handle");
+  TapAccessibilityService.rejects=0;TapAccessibilityService.cancelNext=true;attempts=TapAccessibilityService.attempts;clicks=TapAccessibilityService.clicks;
+  touch(keyboard,MotionEvent.ACTION_DOWN,2400);touch(keyboard,MotionEvent.ACTION_UP,2450);Handler.advance(900);
+  check(TapAccessibilityService.attempts==attempts+1&&TapAccessibilityService.clicks==clicks,"accepted cancelled gesture is never replayed twice");
+  TapAccessibilityService.omitCallback=true;attempts=TapAccessibilityService.attempts;
+  touch(keyboard,MotionEvent.ACTION_DOWN,2600);touch(keyboard,MotionEvent.ACTION_UP,2650);Handler.advance(900);
+  check(TapAccessibilityService.attempts==attempts+1&&!(boolean)field(keyboard,"replaying"),"missing callback restores handle without reinjection");
+  TapAccessibilityService.omitCallback=false;View.omitFrames=true;attempts=TapAccessibilityService.attempts;
+  touch(keyboard,MotionEvent.ACTION_DOWN,2800);touch(keyboard,MotionEvent.ACTION_UP,2850);Handler.advance(900);
+  check(TapAccessibilityService.attempts==attempts&&!(boolean)field(keyboard,"replaying"),"missing frames restore handle without an unsafe timer injection");
+  View.omitFrames=false;
+  touch(keyboard,MotionEvent.ACTION_DOWN,3000);touch(keyboard,MotionEvent.ACTION_UP,3050);
+  screen(keyboard,Intent.ACTION_SCREEN_OFF);Handler.advance(900);
+  check(TapAccessibilityService.attempts==attempts,"screen-off invalidates queued frame callbacks");
+  keyboard.onDestroy();Handler.advance(1000);TapAccessibilityService.probe=null;
+  check(Handler.pending()==0,"keyboard replay leaves no callbacks after destroy");
+  System.out.println("Keyboard replay: slow press, DOWN anchor, delayed frames, bounded rejection, no repeat after cancellation/timeout, missing frames and screen-off passed (host fixtures).");
   TapAccessibilityService.connected=false;Prefs.data.put("accessibility_overlay",true);Settings.allowed=false;
   OverlayService waiting=start();check(waiting.windows.adds==0&&!waiting.stopped&&OverlayService.statusHint.contains("暂停"),"startup waits for accessibility without adding a normal window");
   waiting.onDestroy();TapAccessibilityService.connected=true;Settings.allowed=true;Prefs.data.clear();
+  appUpdates();
   System.out.println("Production OverlayService: delayed unlock, lost root, deferred repair, tap replay, failed relayout, sticky restart, explicit stop, partial attachment, retry limits and revoked permission passed (host fixtures).");
   System.out.println("Accessibility overlay: opt-in window type, manager/token, replay, disconnect without fallback, new/same-manager reconnect, lockscreen, normal mode switch and startup waiting passed (host fixtures).");
+  System.out.println("App updates: 11 to 12 favorites, stable active gesture, app replacement, uninstall and manual refresh passed (host fixtures).");
  }
 }
 """,
@@ -283,7 +421,7 @@ for name, source in sources.items():
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source)
     paths.append(str(path))
-for name in ["OverlayService.java", "OverlayRecovery.java", "DeleteHold.java", "TapClassifier.java", "EntryPlacement.java", "FanGeometry.java"]:
+for name in ["OverlayService.java", "OverlayRecovery.java", "DeleteHold.java", "TapClassifier.java", "EntryPlacement.java", "FanGeometry.java", "AppEntry.java"]:
     paths.append(str(project / "app/src/main/java/dev/corner/bloom" / name))
 compiler = (["java", "-jar", os.environ["BLOOM_ECJ_JAR"], "-17"] if os.environ.get("BLOOM_ECJ_JAR")
             else ["java", "com.sun.tools.javac.Main"])

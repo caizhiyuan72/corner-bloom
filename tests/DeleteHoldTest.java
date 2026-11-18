@@ -15,7 +15,7 @@ public final class DeleteHoldTest {
     static class Editor implements DeleteHold.Source {int deleted;boolean valid=true;boolean accepted=true;public boolean valid(){return valid;}public boolean erase(){if(accepted)deleted++;return accepted;}}
     public static void main(String[] args){
         Clock clock=new Clock();Editor editor=new Editor();DeleteHold hold=new DeleteHold(clock,500,80,8);
-        TapClassifier taps=new TapClassifier(8);
+        TapClassifier taps=new TapClassifier(8,500);
         // Short taps remain eligible for the existing single tap replay.
         taps.begin(4,6,0);hold.down(4,6,editor);clock.advance(80);
         check(!hold.release()&&taps.finish(4,6,80),"short press stays a tap");clock.advance(1000);

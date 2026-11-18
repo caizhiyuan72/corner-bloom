@@ -43,6 +43,8 @@ public final class OverlayService extends Service {
     private int screenW,screenH;
     private RectF trigger;
     private List<AppEntry> all=new ArrayList<>();
+    private BroadcastReceiver packageReceiver;
+    private boolean appsPending;
     private final Handler main=new Handler(Looper.getMainLooper());
     private final ExecutorService loader=Executors.newSingleThreadExecutor();
     private int generation;
@@ -55,7 +57,9 @@ public final class OverlayService extends Service {
         if(deleteHold!=null)deleteHold.cancel();
         cancelTapReplay();
         touching=false;view.reset();
-        view.setApps(AppEntry.favorites(all,prefs));measure();layoutWindows();showExpanded(false);
+        List<AppEntry> favorites = applyFavorites();
+        if ("apps".equals(key) && favorites.size() < prefs.selected().size()) loadApps();
+        measure();layoutWindows();showExpanded(false);
         recovery.request(false);scheduleHealth(0);
     };
     private final BroadcastReceiver screen=new BroadcastReceiver(){
@@ -73,7 +77,8 @@ public final class OverlayService extends Service {
         windowWm=wm;
         editorChanged=()->main.post(this::checkWindows);
         screenOff=!((PowerManager)getSystemService(POWER_SERVICE)).isInteractive();
-        tapClassifier=new TapClassifier(Math.max(dp(8),ViewConfiguration.get(this).getScaledTouchSlop()));
+        tapClassifier=new TapClassifier(Math.max(dp(8),ViewConfiguration.get(this).getScaledTouchSlop()),
+                ViewConfiguration.getLongPressTimeout());
         deleteHold=new DeleteHold((action,delay)->main.postDelayed(action,delay),
                 ViewConfiguration.getLongPressTimeout(),80,Math.max(dp(8),ViewConfiguration.get(this).getScaledTouchSlop()));
         TapAccessibilityService.setStateListener(()->main.post(()->{
@@ -96,6 +101,7 @@ public final class OverlayService extends Service {
         startForeground(7,notification.build());
         IntentFilter filter=new IntentFilter();filter.addAction(Intent.ACTION_SCREEN_OFF);filter.addAction(Intent.ACTION_SCREEN_ON);filter.addAction(Intent.ACTION_USER_PRESENT);
         if(Build.VERSION.SDK_INT>=33)registerReceiver(screen,filter,Context.RECEIVER_NOT_EXPORTED);else registerReceiver(screen,filter);
+        packageReceiver = AppEntry.watchPackages(this, () -> { if (view != null) loadApps(); });
         getSharedPreferences("bloom",MODE_PRIVATE).registerOnSharedPreferenceChangeListener(changes);
     }
     @Override public int onStartCommand(Intent intent,int flags,int startId){
@@ -153,7 +159,7 @@ public final class OverlayService extends Service {
             if(Build.VERSION.SDK_INT>=28)handleParams.layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             if(Build.VERSION.SDK_INT>=30)handleParams.setFitInsetsTypes(0);
             loadApps();
-        }
+        } else if (RESTORE.equals(action)) loadApps();
         recovery.request(RESTORE.equals(action));checkWindows();
         return START_STICKY;
     }
@@ -274,15 +280,30 @@ public final class OverlayService extends Service {
         final int request=++generation;
         loader.execute(()->{
             List<AppEntry> loaded=AppEntry.load(this);
-            main.post(()->{if(request!=generation||view==null)return;all=loaded;view.setApps(AppEntry.favorites(all,prefs));});
+            main.post(() -> {
+                if (request != generation || view == null) return;
+                all = loaded;
+                appsPending = true;
+                // The current gesture must keep the same app order until release.
+                if (!touching && !view.interactionActive()) applyFavorites();
+            });
         });
+    }
+    private List<AppEntry> applyFavorites() {
+        List<AppEntry> favorites = AppEntry.favorites(all, prefs);
+        view.setApps(favorites);
+        appsPending = false;
+        return favorites;
     }
     private float dp(float n){return n*getResources().getDisplayMetrics().density;}
     private boolean tapThroughReady(){return prefs.get("tap_through",false)&&TapAccessibilityService.available();}
     private boolean forwardHandleTouch(MotionEvent event){
         if(replaying)return true;
         int action=event.getActionMasked();float x=event.getRawX(),y=event.getRawY();
-        if(action==MotionEvent.ACTION_DOWN)touching=true;
+        if(action==MotionEvent.ACTION_DOWN){
+            if (appsPending && !view.interactionActive()) applyFavorites();
+            touching=true;
+        }
         else if(action==MotionEvent.ACTION_UP||action==MotionEvent.ACTION_CANCEL)touching=false;
         if(action==MotionEvent.ACTION_DOWN)deleteHold.down(x,y,deleteSource(x,y));
         else if(action==MotionEvent.ACTION_MOVE){
@@ -305,7 +326,9 @@ public final class OverlayService extends Service {
         boolean tap=action==MotionEvent.ACTION_UP&&tapClassifier.finish(x,y,event.getEventTime())&&!view.gestureActive();
         boolean consumed=view.onTouchEvent(event);
         if(view.gestureActive())deleteHold.cancel();
-        if(tap&&tapThroughReady())replayTap(x,y);
+        // Keyboard keys are chosen at DOWN. Small release jitter must not move a
+        // valid tap into a neighbour, outside the key, or into the navigation area.
+        if(tap&&tapThroughReady())replayTap(tapClassifier.downX(),tapClassifier.downY());
         return consumed;
     }
     private DeleteHold.Source deleteSource(float x,float y){
@@ -337,19 +360,38 @@ public final class OverlayService extends Service {
     private void replayTap(float x,float y){
         if(!handleAdded||replaying)return;
         replaying=true;final int request=++replayGeneration;
+        final long started=SystemClock.uptimeMillis();
         // Make the actual WINDOW transparent and non-touchable before injecting.
         // View alpha alone would still leave an obscuring input window on Android 12+.
         handleParams.alpha=0;handleParams.flags|=WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-        try{windowWm.updateViewLayout(handle,handleParams);}catch(RuntimeException e){cancelTapReplay();return;}
+        try{windowWm.updateViewLayout(handle,handleParams);}catch(RuntimeException e){recordWindowFailure(e);cancelTapReplay();return;}
         Runnable restore=()->{if(request==replayGeneration)cancelTapReplay();};
-        main.postDelayed(()->{
+        // updateViewLayout schedules a traversal; a fixed timer alone can run
+        // before that traversal on a busy UI thread. Cross two frame boundaries
+        // so at least one traversal can apply the non-touchable input window.
+        handle.postOnAnimation(()->{
             if(request!=replayGeneration||!replaying)return;
-            if(!tapThroughReady()){restore.run();return;}
-            try{if(!TapAccessibilityService.tap(x,y,restore))restore.run();}
-            catch(RuntimeException e){restore.run();}
-        },32);
+            handle.postOnAnimation(()->{
+                if(request!=replayGeneration||!replaying)return;
+                main.postDelayed(()->dispatchTapReplay(request,x,y,0),
+                        Math.max(0,32-(SystemClock.uptimeMillis()-started)));
+            });
+        });
         // Also restore if a vendor accessibility implementation omits its callback.
         main.postDelayed(restore,800);
+    }
+    private void dispatchTapReplay(int request,float x,float y,int attempt){
+        if(request!=replayGeneration||!replaying)return;
+        if(!tapThroughReady()){cancelTapReplay();return;}
+        Runnable restore=()->{if(request==replayGeneration)cancelTapReplay();};
+        try{
+            if(TapAccessibilityService.tap(x,y,restore))return;
+        }catch(RuntimeException e){restore.run();return;}
+        // Only a request explicitly NOT accepted by Android can be retried.
+        // A completed/cancelled/timed-out accepted gesture might already have
+        // reached the keyboard: replaying it could send or submit twice.
+        if(attempt==0)main.postDelayed(()->dispatchTapReplay(request,x,y,1),32);
+        else restore.run();
     }
     private void cancelTapReplay(){
         replayGeneration++;replaying=false;
@@ -414,6 +456,7 @@ public final class OverlayService extends Service {
         if(running)statusHint="服务已停止，可点恢复入口重新开启";
         running=false;generation++;replayGeneration++;TapAccessibilityService.setStateListener(null);loader.shutdownNow();main.removeCallbacksAndMessages(null);
         getSharedPreferences("bloom",MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(changes);
+        unregisterReceiver(packageReceiver);
         try{unregisterReceiver(screen);}catch(IllegalArgumentException ignored){}
         if(view!=null)view.reset();removeWindows();
         handleAdded=false;handle=null;added=false;view=null;stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();
